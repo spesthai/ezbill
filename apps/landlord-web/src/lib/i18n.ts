@@ -43,6 +43,9 @@ const resources = {
         fieldTambon: "乡 / 街道",
         fieldAddress: "完整地址",
         fieldAddressPlaceholder: "输入详细地址（可选）",
+        fieldTambonPlaceholder: "输入乡/街道名称搜索",
+        fieldAmphoePlaceholder: "县 / 区（自动填充）",
+        fieldProvincePlaceholder: "府 / 省（自动填充）",
       },
       dashboard: {
         properties: "楼盘数",
@@ -103,6 +106,9 @@ const resources = {
         fieldTambon: "Sub-district / ตำบล",
         fieldAddress: "Full address",
         fieldAddressPlaceholder: "Enter full address (optional)",
+        fieldTambonPlaceholder: "Type sub-district to search",
+        fieldAmphoePlaceholder: "District (auto-filled)",
+        fieldProvincePlaceholder: "Province (auto-filled)",
       },
       dashboard: {
         properties: "Properties",
@@ -163,6 +169,9 @@ const resources = {
         fieldTambon: "ตำบล",
         fieldAddress: "ที่อยู่เต็ม",
         fieldAddressPlaceholder: "กรอกที่อยู่เต็ม (ไม่บังคับ)",
+        fieldTambonPlaceholder: "พิมพ์ชื่อตำบลเพื่อค้นหา",
+        fieldAmphoePlaceholder: "อำเภอ (กรอกอัตโนมัติ)",
+        fieldProvincePlaceholder: "จังหวัด (กรอกอัตโนมัติ)",
       },
       dashboard: {
         properties: "อสังหาริมทรัพย์",

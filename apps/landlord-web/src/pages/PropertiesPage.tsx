@@ -1,20 +1,88 @@
-import { Button, Drawer, Form, Input, Modal, message } from "antd";
-import { useState } from "react";
+import { AutoComplete, Button, Drawer, Form, Input, Modal, message } from "antd";
+import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type Property, type PropertyInput, useProperties } from "../hooks/useProperties";
 
+// ── Thai address types ──────────────────────────────────────────
+interface TambonEntry {
+  id: number;
+  zip_code: number;
+  name_th: string;
+  name_en: string;
+  amphure_id: number;
+}
+interface AmphureEntry {
+  id: number;
+  name_th: string;
+  name_en: string;
+  tambon: TambonEntry[];
+}
+interface ProvinceEntry {
+  id: number;
+  name_th: string;
+  name_en: string;
+  amphure: AmphureEntry[];
+}
+
+interface AddressRecord {
+  tambonTh: string;
+  tambonEn: string;
+  amphoeTh: string;
+  amphoeEn: string;
+  provinceTh: string;
+  provinceEn: string;
+  zipCode: number;
+}
+
+let addressIndex: AddressRecord[] | null = null;
+
+async function getAddressIndex(): Promise<AddressRecord[]> {
+  if (addressIndex) return addressIndex;
+  const mod = await import("../../../json/thai_address.json");
+  const provinces: ProvinceEntry[] = mod.default as ProvinceEntry[];
+  const records: AddressRecord[] = [];
+  for (const prov of provinces) {
+    for (const amp of prov.amphure) {
+      for (const tam of amp.tambon) {
+        records.push({
+          tambonTh: tam.name_th,
+          tambonEn: tam.name_en,
+          amphoeTh: amp.name_th,
+          amphoeEn: amp.name_en,
+          provinceTh: prov.name_th,
+          provinceEn: prov.name_en,
+          zipCode: tam.zip_code,
+        });
+      }
+    }
+  }
+  addressIndex = records;
+  return records;
+}
+
 export default function PropertiesPage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { properties, loading, createProperty, updateProperty, deleteProperty } = useProperties();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Property | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<PropertyInput>();
 
+  // AutoComplete state
+  const [tambonOptions, setTambonOptions] = useState<{ value: string; label: string; record: AddressRecord }[]>([]);
+  const indexRef = useRef<AddressRecord[] | null>(null);
+
+  const loadIndex = useCallback(async () => {
+    if (!indexRef.current) {
+      indexRef.current = await getAddressIndex();
+    }
+  }, []);
+
   function openCreate() {
     setEditing(null);
     form.resetFields();
     setDrawerOpen(true);
+    loadIndex();
   }
 
   function openEdit(p: Property) {
@@ -27,6 +95,7 @@ export default function PropertiesPage() {
       full_address: p.full_address ?? "",
     });
     setDrawerOpen(true);
+    loadIndex();
   }
 
   async function handleSave() {
@@ -54,6 +123,38 @@ export default function PropertiesPage() {
         else message.success(t("properties.deleted"));
       },
     });
+  }
+
+  const isEn = i18n.language === "en";
+
+  function handleTambonSearch(text: string) {
+    if (!indexRef.current || text.length < 1) {
+      setTambonOptions([]);
+      return;
+    }
+    const lower = text.toLowerCase();
+    const matched = indexRef.current
+      .filter((r) =>
+        r.tambonTh.includes(text) ||
+        r.tambonEn.toLowerCase().includes(lower)
+      )
+      .slice(0, 20)
+      .map((r) => ({
+        value: isEn ? r.tambonEn : r.tambonTh,
+        label: `${isEn ? r.tambonEn : r.tambonTh} · ${isEn ? r.amphoeEn : r.amphoeTh} · ${isEn ? r.provinceEn : r.provinceTh}`,
+        record: r,
+      }));
+    setTambonOptions(matched);
+  }
+
+  function handleTambonSelect(_value: string, option: { record: AddressRecord }) {
+    const r = option.record;
+    form.setFieldsValue({
+      tambon: isEn ? r.tambonEn : r.tambonTh,
+      amphoe: isEn ? r.amphoeEn : r.amphoeTh,
+      province: isEn ? r.provinceEn : r.provinceTh,
+    });
+    setTambonOptions([]);
   }
 
   return (
@@ -185,15 +286,28 @@ export default function PropertiesPage() {
           >
             <Input placeholder={t("properties.fieldLabelPlaceholder")} size="large" style={{ borderRadius: 8 }} />
           </Form.Item>
-          <Form.Item name="province" label={t("properties.fieldProvince")}>
-            <Input placeholder="e.g. Chiang Mai / เชียงใหม่" size="large" style={{ borderRadius: 8 }} />
-          </Form.Item>
-          <Form.Item name="amphoe" label={t("properties.fieldAmphoe")}>
-            <Input placeholder="e.g. Mueang" size="large" style={{ borderRadius: 8 }} />
-          </Form.Item>
+
+          {/* Tambon with autocomplete — selecting auto-fills amphoe + province */}
           <Form.Item name="tambon" label={t("properties.fieldTambon")}>
-            <Input placeholder="e.g. Si Phum" size="large" style={{ borderRadius: 8 }} />
+            <AutoComplete
+              options={tambonOptions}
+              onSearch={handleTambonSearch}
+              onSelect={handleTambonSelect}
+              placeholder={t("properties.fieldTambonPlaceholder")}
+              size="large"
+              style={{ width: "100%", borderRadius: 8 }}
+              filterOption={false}
+            />
           </Form.Item>
+
+          <Form.Item name="amphoe" label={t("properties.fieldAmphoe")}>
+            <Input placeholder={t("properties.fieldAmphoePlaceholder")} size="large" style={{ borderRadius: 8 }} />
+          </Form.Item>
+
+          <Form.Item name="province" label={t("properties.fieldProvince")}>
+            <Input placeholder={t("properties.fieldProvincePlaceholder")} size="large" style={{ borderRadius: 8 }} />
+          </Form.Item>
+
           <Form.Item name="full_address" label={t("properties.fieldAddress")}>
             <Input.TextArea
               placeholder={t("properties.fieldAddressPlaceholder")}
