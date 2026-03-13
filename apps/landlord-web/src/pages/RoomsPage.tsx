@@ -7,7 +7,7 @@ import type { MeterReadings } from "../hooks/useRooms";
 
 // ── Occupancy status config ────────────────────────────────────
 const OCCUPANCY_CONFIG = {
-  occupied: { bg: "#D1FAE5", color: "#059669", dotColor: "#059669" },
+  occupied: { bg: "#EFF6FF", color: "#1E40FF", dotColor: "#1E40FF" },
   vacant:   { bg: "#FEF3C7", color: "#D97706", dotColor: "#D97706" },
 };
 
@@ -254,7 +254,7 @@ export default function RoomsPage() {
       {/* Stats bar */}
       {selectedPropertyId && rooms.length > 0 && (
         <div style={{ display: "flex", gap: 12 }}>
-          <StatPill color="#059669" bg="#D1FAE5" label={t("rooms.occupied")} value={occupiedCount} />
+          <StatPill color="#1E40FF" bg="#EFF6FF" label={t("rooms.occupied")} value={occupiedCount} />
           <StatPill color="#D97706" bg="#FEF3C7" label={t("rooms.vacant")} value={vacantCount} />
           <StatPill color="#6B7280" bg="#F3F4F6" label={t("rooms.total")} value={rooms.length} />
         </div>
