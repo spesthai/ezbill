@@ -8,7 +8,10 @@
   ],
   "scripts": {
     "build": "npm --workspace apps/landlord-web run build",
-    "typecheck": "npm --workspace apps/landlord-web run typecheck"
+    "typecheck": "npm --workspace apps/landlord-web run typecheck",
+    "wrangler": "XDG_CONFIG_HOME=.xdg WRANGLER_HOME=.wrangler wrangler"
+  },
+  "devDependencies": {
+    "wrangler": "^4.72.0"
   }
 }
-
