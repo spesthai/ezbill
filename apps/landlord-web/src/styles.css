@@ -1,0 +1,14 @@
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #f4f8ff 0%, #ffffff 45%);
+}
+
