@@ -1,9 +1,15 @@
-import { Button, Drawer, Form, Input, InputNumber, Modal, Select, Spin, message } from "antd";
+import { Button, DatePicker, Drawer, Form, Input, InputNumber, Modal, Select, Spin, message } from "antd";
+import type { Dayjs } from "dayjs";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useProperties } from "../hooks/useProperties";
 import { type BulkRoomInput, type Room, type RoomInput, useRooms } from "../hooks/useRooms";
 import type { MeterReadings } from "../hooks/useRooms";
+import {
+  HOURLY_MAX, HOURLY_MIN, HOURLY_PRESETS,
+  calcExpiresAt, formatBKK, getExpiryStatus, utcToBkkLocal,
+  type RentalType,
+} from "../lib/occupancyUtils";
 
 // ── Occupancy status config ────────────────────────────────────
 const OCCUPANCY_CONFIG = {
@@ -74,7 +80,11 @@ export default function RoomsPage() {
   const [editing, setEditing] = useState<Room | null>(null);
   const [saving, setSaving] = useState(false);
   const [meterLoading, setMeterLoading] = useState(false);
-  const [form] = Form.useForm<RoomInput>();
+  type RoomFormValues = RoomInput & { check_in_dayjs?: Dayjs | null };
+  const [form] = Form.useForm<RoomFormValues>();
+
+  // Computed expires_at display for the Drawer
+  const [expiresAtDisplay, setExpiresAtDisplay] = useState<string>("—");
 
   // Bulk create drawer
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -93,10 +103,28 @@ export default function RoomsPage() {
     { value: "stall",   label: t("rooms.typeStall") },
   ];
 
+  // ── Occupancy time helpers ───────────────────────────────────
+  function recalcExpires(checkInDayjs: Dayjs | null, rentalType: string | undefined, hourlyDuration: number | undefined): string | null {
+    if (!checkInDayjs || !rentalType) { setExpiresAtDisplay("—"); return null; }
+    const checkInUtc = new Date(checkInDayjs.valueOf() - 7 * 60 * 60 * 1000);
+    const exp = calcExpiresAt(checkInUtc, rentalType as RentalType, hourlyDuration);
+    setExpiresAtDisplay(formatBKK(exp));
+    return exp.toISOString();
+  }
+
+  function handleFormValuesChange() {
+    const checkIn = form.getFieldValue("check_in_dayjs") as Dayjs | null;
+    const rentalType = form.getFieldValue("rental_type") as string | undefined;
+    const hourlyDuration = form.getFieldValue("hourly_duration") as number | undefined;
+    const expiresIso = recalcExpires(checkIn, rentalType, hourlyDuration);
+    form.setFieldValue("expires_at", expiresIso ?? null);
+  }
+
   // ── Single room ──────────────────────────────────────────────
   function openCreate(template?: Room) {
     setEditing(null);
     form.resetFields();
+    setExpiresAtDisplay("—");
     if (template) {
       form.setFieldsValue({
         floor: template.floor ?? "",
@@ -113,12 +141,25 @@ export default function RoomsPage() {
 
   async function openEdit(r: Room) {
     setEditing(r);
+    setExpiresAtDisplay(r.expires_at ? formatBKK(r.expires_at) : "—");
+    // Build check_in dayjs from UTC stored value (shift to BKK for display)
+    let checkInDayjs = null;
+    if (r.check_in_at) {
+      const bkkLocal = utcToBkkLocal(r.check_in_at);
+      if (bkkLocal) {
+        const { default: dayjs } = await import("dayjs");
+        checkInDayjs = dayjs(bkkLocal);
+      }
+    }
     form.setFieldsValue({
       label: r.label,
       floor: r.floor ?? "",
       rental_type: r.rental_type ?? undefined,
       occupancy_status: r.occupancy_status,
       base_rent: r.base_rent ?? undefined,
+      check_in_dayjs: checkInDayjs,
+      expires_at: r.expires_at ?? null,
+      hourly_duration: r.hourly_duration ?? undefined,
       initial_water_reading: undefined,
       initial_electricity_reading: undefined,
     });
@@ -134,8 +175,15 @@ export default function RoomsPage() {
   }
 
   async function handleSave() {
-    let values: RoomInput;
+    let values: RoomFormValues;
     try { values = await form.validateFields(); } catch { return; }
+    // Convert Dayjs (BKK local) to UTC ISO for storage
+    if (values.check_in_dayjs) {
+      values.check_in_at = new Date(values.check_in_dayjs.valueOf() - 7 * 60 * 60 * 1000).toISOString();
+    } else {
+      values.check_in_at = null;
+      values.expires_at = null;
+    }
     setSaving(true);
     const err = editing
       ? await updateRoom(editing.id, values)
@@ -339,6 +387,15 @@ export default function RoomsPage() {
                       <span style={{ fontSize: 12, color: "#374151" }}>{t(`rooms.type_${r.rental_type}`)}</span>
                     </div>
                   )}
+                  {r.check_in_at && (
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 12, color: "#6B7280" }}>{t("rooms.fieldCheckIn")}</span>
+                      <span style={{ fontSize: 12, color: "#374151" }}>{formatBKK(r.check_in_at)}</span>
+                    </div>
+                  )}
+                  {r.expires_at && (
+                    <ExpiresRow label={t("rooms.fieldExpiresAt")} expiresAt={r.expires_at} />
+                  )}
                 </div>
 
                 {/* Actions */}
@@ -404,7 +461,10 @@ export default function RoomsPage() {
           </div>
         }
       >
-        <Form form={form} layout="vertical" requiredMark={false}>
+        <Form form={form} layout="vertical" requiredMark={false} onValuesChange={handleFormValuesChange}>
+          {/* Hidden field for computed values */}
+          <Form.Item name="expires_at" hidden><Input /></Form.Item>
+
           <SectionLabel label={t("rooms.sectionBasic")} />
           <Form.Item
             name="label"
@@ -433,6 +493,77 @@ export default function RoomsPage() {
           <Form.Item name="base_rent" label={t("rooms.fieldBaseRent")}>
             <InputNumber size="large" min={0} precision={2} prefix="฿" placeholder="0.00"
               style={{ width: "100%", borderRadius: 8 }} />
+          </Form.Item>
+
+          {/* ── Occupancy timing ─────────────────────────────── */}
+          <Form.Item noStyle shouldUpdate={(p, c) => p.rental_type !== c.rental_type}>
+            {({ getFieldValue }) => {
+              const rentalType = getFieldValue("rental_type");
+              if (!rentalType) return null;
+              const isHourly = rentalType === "hourly";
+              return (
+                <>
+                  <SectionLabel label={t("rooms.sectionOccupancy")} />
+                  {/* Check-in: date + time picker */}
+                  <Form.Item name="check_in_dayjs" label={`${t("rooms.fieldCheckIn")} (${t("rooms.fieldCheckInOptional")})`}>
+                    <DatePicker
+                      showTime={{ format: "HH:mm", minuteStep: 30 }}
+                      format="DD/MM/YY HH:mm"
+                      size="large"
+                      style={{ width: "100%", borderRadius: 8 }}
+                      placeholder={t("rooms.checkInPlaceholder")}
+                    />
+                  </Form.Item>
+
+                  {/* Hourly duration — only for hourly type */}
+                  {isHourly && (
+                    <Form.Item
+                      name="hourly_duration"
+                      label={t("rooms.fieldHourlyDuration")}
+                      rules={[{
+                        validator: (_, v) =>
+                          !v || (v >= HOURLY_MIN && v <= HOURLY_MAX)
+                            ? Promise.resolve()
+                            : Promise.reject(t("rooms.hourlyDurationRange")),
+                      }]}
+                    >
+                      <Select
+                        size="large"
+                        allowClear
+                        placeholder={t("rooms.hourlyDurationPlaceholder")}
+                        style={{ borderRadius: 8 }}
+                        options={HOURLY_PRESETS.map((h) => ({
+                          value: h,
+                          label: `${h} ${t("rooms.hourlyDurationUnit")}`,
+                        }))}
+                      />
+                    </Form.Item>
+                  )}
+
+                  {/* Expires at — read-only computed display */}
+                  <div style={{ marginBottom: 24 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
+                      {t("rooms.fieldExpiresAt")}
+                    </div>
+                    <div style={{
+                      height: 40, padding: "0 12px", background: "#F9FAFB",
+                      border: "1px solid #E5E7EB", borderRadius: 8,
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                    }}>
+                      <span style={{
+                        fontSize: 14,
+                        color: expiresAtDisplay === "—" ? "#9CA3AF" : "#111827",
+                        fontWeight: expiresAtDisplay === "—" ? 400 : 500,
+                      }}>
+                        {expiresAtDisplay}
+                      </span>
+                      <span style={{ fontSize: 11, color: "#9CA3AF" }}>{t("rooms.expiresAtAuto")}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 4 }}>{t("rooms.expiresAtHint")}</div>
+                  </div>
+                </>
+              );
+            }}
           </Form.Item>
 
           {/* Meter readings — always shown; editing loads current baseline */}
@@ -533,6 +664,20 @@ export default function RoomsPage() {
           <MeterFields t={t} />
         </Form>
       </Drawer>
+    </div>
+  );
+}
+
+// ── ExpiresRow: colored expiry display for room cards ─────────
+function ExpiresRow({ label, expiresAt }: { label: string; expiresAt: string }) {
+  const status = getExpiryStatus(expiresAt);
+  const color = status === "expired" ? "#DC2626" : status === "warning" ? "#D97706" : "#374151";
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between" }}>
+      <span style={{ fontSize: 12, color: "#6B7280" }}>{label}</span>
+      <span style={{ fontSize: 12, color, fontWeight: status !== "normal" ? 600 : 400 }}>
+        {formatBKK(expiresAt)}
+      </span>
     </div>
   );
 }

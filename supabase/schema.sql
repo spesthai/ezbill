@@ -61,8 +61,17 @@ create table if not exists public.rooms (
   rental_type text check (rental_type in ('monthly', 'daily', 'hourly', 'stall')),
   occupancy_status text not null default 'occupied' check (occupancy_status in ('occupied', 'vacant')),
   base_rent numeric(10,2),
+  check_in_at timestamptz default null,
+  expires_at timestamptz default null,
+  hourly_duration numeric(5,1) default null
+    constraint hourly_duration_positive check (hourly_duration is null or hourly_duration > 0),
   created_at timestamptz default now()
 );
+
+-- Index for expiry reminder queries: find occupied rooms expiring soon
+create index if not exists rooms_expires_at_status
+  on public.rooms (expires_at, occupancy_status)
+  where expires_at is not null and occupancy_status = 'occupied';
 
 -- ============================================================
 -- Bills / Readings / Payments

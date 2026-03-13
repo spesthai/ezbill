@@ -9,6 +9,9 @@ export interface Room {
   rental_type: "monthly" | "daily" | "hourly" | "stall" | null;
   occupancy_status: "occupied" | "vacant";
   base_rent: number | null;
+  check_in_at: string | null;   // UTC ISO string
+  expires_at: string | null;    // UTC ISO string
+  hourly_duration: number | null;
   created_at: string;
 }
 
@@ -18,6 +21,9 @@ export interface RoomInput {
   rental_type?: Room["rental_type"];
   occupancy_status: Room["occupancy_status"];
   base_rent?: number | null;
+  check_in_at?: string | null;
+  expires_at?: string | null;
+  hourly_duration?: number | null;
   initial_water_reading?: number | null;
   initial_electricity_reading?: number | null;
 }
@@ -59,7 +65,7 @@ export function useRooms(propertyId: string | null) {
     setLoading(true);
     const { data, error: err } = await supabase
       .from("rooms")
-      .select("id, property_id, label, floor, rental_type, occupancy_status, base_rent, created_at")
+      .select("id, property_id, label, floor, rental_type, occupancy_status, base_rent, check_in_at, expires_at, hourly_duration, created_at")
       .eq("property_id", propertyId)
       .order("created_at", { ascending: true });
     if (err) setError(err.message);
@@ -102,6 +108,9 @@ export function useRooms(propertyId: string | null) {
       rental_type: input.rental_type || null,
       occupancy_status: input.occupancy_status,
       base_rent: input.base_rent ?? null,
+      check_in_at: input.check_in_at ?? null,
+      expires_at: input.expires_at ?? null,
+      hourly_duration: input.hourly_duration ?? null,
     }).select("id").single();
     if (err) return err.message;
     await upsertMeterReadings(data.id, input.initial_water_reading, input.initial_electricity_reading);
@@ -117,6 +126,9 @@ export function useRooms(propertyId: string | null) {
       rental_type: input.rental_type || null,
       occupancy_status: input.occupancy_status,
       base_rent: input.base_rent ?? null,
+      check_in_at: input.check_in_at ?? null,
+      expires_at: input.expires_at ?? null,
+      hourly_duration: input.hourly_duration ?? null,
     }).eq("id", id);
     if (err) return err.message;
     // Always write new meter readings when provided (new record = new baseline)
