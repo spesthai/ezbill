@@ -98,8 +98,8 @@ export default function BillsPage() {
   const [otherTotal, setOtherTotal] = useState<number>(0);
   const [totalAmount, setTotalAmount] = useState<number>(0);
 
-  // Share token modal
-  const [shareToken, setShareToken] = useState<string | null>(null);
+  // Share token modal (stores array for batch)
+  const [shareTokens, setShareTokens] = useState<string[]>([]);
 
   // ── Recalculate totals ────────────────────────────────────────
   function recalcTotals(values: Record<string, unknown>) {
@@ -139,11 +139,17 @@ export default function BillsPage() {
   function handlePeriodFieldChange(_: unknown, all: Record<string, unknown>) {
     const start = all.period_start as Dayjs | undefined;
     const unit  = all.billing_unit as string | undefined;
-    const qty   = Number(all.billing_quantity ?? 1);
+    // period_end = end of the FIRST bill (1 period unit)
     if (start?.isValid() && unit) {
-      form.setFieldValue("period_end", calcPeriodEnd(start, unit, qty));
+      form.setFieldValue("period_end", calcPeriodEnd(start, unit, 1));
     }
     recalcTotals(form.getFieldsValue());
+  }
+
+  // Next bill start = day after current bill ends (or next hour for hourly)
+  function nextPeriodStart(end: Dayjs, unit: string): Dayjs {
+    if (unit === "hour") return end.add(1, "second");
+    return end.add(1, "day");
   }
 
   // ── Open create drawer ────────────────────────────────────────
@@ -171,7 +177,7 @@ export default function BillsPage() {
       period_start: periodStart,
       period_end: periodEnd,
       billing_unit: billingUnit,
-      billing_quantity: 1,
+      bill_count: 1,
       rent_amount: selectedRoom.base_rent ?? undefined,
     });
 
@@ -187,7 +193,7 @@ export default function BillsPage() {
     recalcTotals(form.getFieldsValue());
   }
 
-  // ── Save bill ─────────────────────────────────────────────────
+  // ── Save bill(s) ──────────────────────────────────────────────
   async function handleSave() {
     let values: Record<string, unknown>;
     try { values = await form.validateFields(); } catch { return; }
@@ -204,30 +210,46 @@ export default function BillsPage() {
       message.error(t("bills.negativeUsageError")); return;
     }
 
-    const input: BillInput = {
-      room_id: selectedRoom.id,
-      period_start: (values.period_start as Dayjs).toISOString(),
-      period_end: (values.period_end as Dayjs).toISOString(),
-      due_at: (values.period_end as Dayjs).toISOString(),  // due = period end
-      billing_unit: values.billing_unit as BillInput["billing_unit"],
-      billing_quantity: Number(values.billing_quantity ?? 1),
-      rent_amount: Number(values.rent_amount ?? 0),
-      water_prev_reading: wPrev ?? null,
-      water_curr_reading: wCurr ?? null,
-      water_unit_price: (values.water_unit_price as number | null) ?? null,
-      electricity_prev_reading: ePrev ?? null,
-      electricity_curr_reading: eCurr ?? null,
-      electricity_unit_price: (values.electricity_unit_price as number | null) ?? null,
-      other_fees: (values.other_fees as OtherFee[] | undefined)?.filter((f) => f?.label && f?.amount) ?? [],
-    };
+    const billingUnit = values.billing_unit as BillInput["billing_unit"];
+    const billCount   = Math.max(1, Math.round(Number(values.bill_count ?? 1)));
+    const rent        = Number(values.rent_amount ?? 0);
+    const otherFees   = (values.other_fees as OtherFee[] | undefined)?.filter((f) => f?.label && f?.amount) ?? [];
+    const wPrice      = (values.water_unit_price as number | null) ?? null;
+    const ePrice      = (values.electricity_unit_price as number | null) ?? null;
 
     setSaving(true);
-    const { shareToken: token, error: err } = await createBill(input);
+    const tokens: string[] = [];
+    let curStart = values.period_start as Dayjs;
+
+    for (let i = 0; i < billCount; i++) {
+      const curEnd = calcPeriodEnd(curStart, billingUnit, 1);
+      const input: BillInput = {
+        room_id: selectedRoom.id,
+        period_start: curStart.toISOString(),
+        period_end: curEnd.toISOString(),
+        due_at: curEnd.toISOString(),
+        billing_unit: billingUnit,
+        billing_quantity: 1,
+        rent_amount: rent,
+        // Only first bill has meter readings
+        water_prev_reading: i === 0 ? (wPrev ?? null) : null,
+        water_curr_reading: i === 0 ? (wCurr ?? null) : null,
+        water_unit_price: wPrice,
+        electricity_prev_reading: i === 0 ? (ePrev ?? null) : null,
+        electricity_curr_reading: i === 0 ? (eCurr ?? null) : null,
+        electricity_unit_price: ePrice,
+        other_fees: otherFees,
+      };
+      const { shareToken: token, error: err } = await createBill(input);
+      if (err) { message.error(err); setSaving(false); return; }
+      if (token) tokens.push(token);
+      curStart = nextPeriodStart(curEnd, billingUnit);
+    }
+
     setSaving(false);
-    if (err) { message.error(err); return; }
-    message.success(t("bills.created"));
+    message.success(billCount > 1 ? t("bills.createdBatch", { count: billCount }) : t("bills.created"));
     setDrawerOpen(false);
-    if (token) setShareToken(token);
+    if (tokens.length > 0) setShareTokens(tokens);
   }
 
   const billingUnitOptions = [
@@ -553,8 +575,8 @@ export default function BillsPage() {
             <Form.Item name="billing_unit" label={t("bills.fieldBillingUnit")}>
               <Select size="large" style={{ borderRadius: 8 }} options={billingUnitOptions} />
             </Form.Item>
-            <Form.Item name="billing_quantity" label={t("bills.fieldBillingQty")}>
-              <InputNumber size="large" min={0.5} step={0.5} precision={1} style={{ width: "100%", borderRadius: 8 }} />
+            <Form.Item name="bill_count" label={t("bills.fieldBillCount")}>
+              <InputNumber size="large" min={1} max={24} step={1} precision={0} style={{ width: "100%", borderRadius: 8 }} />
             </Form.Item>
           </div>
 
@@ -567,20 +589,54 @@ export default function BillsPage() {
             </Form.Item>
           </div>
 
-          {/* Due date = period_end (read-only) */}
-          <Form.Item shouldUpdate={(prev, cur) => prev.period_end !== cur.period_end} noStyle>
+          {/* Due date + batch preview (read-only) */}
+          <Form.Item
+            shouldUpdate={(prev, cur) =>
+              prev.period_start !== cur.period_start ||
+              prev.period_end !== cur.period_end ||
+              prev.billing_unit !== cur.billing_unit ||
+              prev.bill_count !== cur.bill_count
+            }
+            noStyle
+          >
             {() => {
-              const end = form.getFieldValue("period_end") as Dayjs | undefined;
+              const start = form.getFieldValue("period_start") as Dayjs | undefined;
+              const end   = form.getFieldValue("period_end") as Dayjs | undefined;
+              const unit  = form.getFieldValue("billing_unit") as string | undefined;
+              const count = Math.max(1, Number(form.getFieldValue("bill_count") ?? 1));
+              // last bill's end date
+              let lastEnd = end;
+              if (start?.isValid() && unit && count > 1) {
+                let s = nextPeriodStart(end ?? start, unit);
+                for (let i = 1; i < count; i++) {
+                  lastEnd = calcPeriodEnd(s, unit, 1);
+                  if (i < count - 1) s = nextPeriodStart(lastEnd, unit);
+                }
+              }
               return (
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8,
-                  padding: "8px 12px", marginBottom: 16, fontSize: 13,
-                }}>
-                  <span style={{ color: "#6B7280" }}>{t("bills.fieldDueAt")}</span>
-                  <span style={{ fontWeight: 600, color: "#374151" }}>
-                    {end?.isValid() ? end.format("DD/MM/YY") : "—"}
-                  </span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8,
+                    padding: "8px 12px", fontSize: 13,
+                  }}>
+                    <span style={{ color: "#6B7280" }}>{t("bills.fieldDueAt")}</span>
+                    <span style={{ fontWeight: 600, color: "#374151" }}>
+                      {end?.isValid() ? end.format("DD/MM/YY") : "—"}
+                    </span>
+                  </div>
+                  {count > 1 && start?.isValid() && lastEnd?.isValid() && (
+                    <div style={{
+                      background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 8,
+                      padding: "8px 12px", fontSize: 12, color: "#1E40FF", fontWeight: 500,
+                    }}>
+                      {t("bills.batchPreview", {
+                        count,
+                        start: start.format("DD/MM/YY"),
+                        end: lastEnd.format("DD/MM/YY"),
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             }}
@@ -705,25 +761,30 @@ export default function BillsPage() {
 
       {/* ── Share token modal ─────────────────────────────────── */}
       <Modal
-        open={!!shareToken}
+        open={shareTokens.length > 0}
         title={t("bills.shareToken")}
-        onCancel={() => setShareToken(null)}
-        onOk={() => setShareToken(null)}
+        onCancel={() => setShareTokens([])}
+        onOk={() => setShareTokens([])}
         okText="OK"
         cancelButtonProps={{ style: { display: "none" } }}
       >
-        <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
-          <Input readOnly value={shareToken ? `${window.location.origin}/b/${shareToken}` : ""} style={{ borderRadius: 8 }} />
-          <Button style={{ borderRadius: 8, flexShrink: 0 }}
-            onClick={() => {
-              if (shareToken) {
-                navigator.clipboard.writeText(`${window.location.origin}/b/${shareToken}`);
-                message.success(t("bills.shareCopied"));
-              }
-            }}
-          >
-            <CopyIcon />
-          </Button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
+          {shareTokens.map((token, idx) => (
+            <div key={token} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {shareTokens.length > 1 && (
+                <span style={{ fontSize: 12, color: "#6B7280", minWidth: 20 }}>#{idx + 1}</span>
+              )}
+              <Input readOnly value={`${window.location.origin}/b/${token}`} style={{ borderRadius: 8 }} />
+              <Button style={{ borderRadius: 8, flexShrink: 0 }}
+                onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/b/${token}`);
+                  message.success(t("bills.shareCopied"));
+                }}
+              >
+                <CopyIcon />
+              </Button>
+            </div>
+          ))}
         </div>
       </Modal>
     </div>

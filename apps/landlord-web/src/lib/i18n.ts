@@ -189,6 +189,9 @@ const resources = {
         colDue: "到期日",
         colActions: "操作",
         viewBills: "查看账单",
+        fieldBillCount: "账单数量",
+        batchPreview: "将生成 {{count}} 张账单（{{start}} ~ {{end}}）",
+        createdBatch: "已成功创建 {{count}} 张账单",
       },
       dashboard: {
         properties: "楼盘数",
@@ -395,6 +398,9 @@ const resources = {
         colDue: "Due",
         colActions: "Actions",
         viewBills: "View bills",
+        fieldBillCount: "Bill count",
+        batchPreview: "{{count}} bills will be created ({{start}} – {{end}})",
+        createdBatch: "Successfully created {{count}} bills",
       },
       dashboard: {
         properties: "Properties",
@@ -601,6 +607,9 @@ const resources = {
         colDue: "ครบกำหนด",
         colActions: "จัดการ",
         viewBills: "ดูบิล",
+        fieldBillCount: "จำนวนบิล",
+        batchPreview: "จะสร้าง {{count}} บิล ({{start}} – {{end}})",
+        createdBatch: "สร้าง {{count}} บิลสำเร็จ",
       },
       dashboard: {
         properties: "อสังหาริมทรัพย์",
