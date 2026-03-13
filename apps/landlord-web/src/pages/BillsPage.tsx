@@ -1,6 +1,6 @@
 import {
   Button, DatePicker, Drawer, Form, Input, InputNumber,
-  Modal, Select, Spin, Table, Tag, message,
+  Modal, Select, Spin, Table, message,
 } from "antd";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
@@ -8,8 +8,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type BillInput, type BillStatus, type OtherFee, useBills } from "../hooks/useBills";
 import { useProperties } from "../hooks/useProperties";
-import { useRooms } from "../hooks/useRooms";
-import { formatBKK } from "../lib/occupancyUtils";
+import { type Room, useRooms } from "../hooks/useRooms";
+import { formatBKK, getExpiryStatus } from "../lib/occupancyUtils";
 
 // ── Status config ───────────────────────────────────────────────
 const STATUS_CONFIG: Record<BillStatus, { color: string; bg: string; labelKey: string }> = {
@@ -18,26 +18,10 @@ const STATUS_CONFIG: Record<BillStatus, { color: string; bg: string; labelKey: s
   overdue:  { color: "#DC2626", bg: "#FEE2E2", labelKey: "bills.statusOverdue" },
 };
 
-// ── Section divider (reused pattern) ───────────────────────────
-function SectionLabel({ label }: { label: string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "4px 0 12px" }}>
-      <div style={{ flex: 1, height: 1, background: "#F3F4F6" }} />
-      <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", letterSpacing: 0.5, textTransform: "uppercase" }}>{label}</span>
-      <div style={{ flex: 1, height: 1, background: "#F3F4F6" }} />
-    </div>
-  );
-}
-
-// ── Calc display row ────────────────────────────────────────────
-function CalcRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#6B7280", marginTop: 4 }}>
-      <span>{label}</span>
-      <span style={{ fontWeight: 600, color: "#111827" }}>{value}</span>
-    </div>
-  );
-}
+const ROOM_OCCUPANCY_CONFIG = {
+  occupied: { bg: "#EFF6FF", color: "#1E40FF", dotColor: "#1E40FF" },
+  vacant:   { bg: "#FEF3C7", color: "#D97706", dotColor: "#D97706" },
+};
 
 // ── Helpers ─────────────────────────────────────────────────────
 function fmt(n: number | null | undefined): string {
@@ -50,20 +34,57 @@ function fmtDate(iso: string | null | undefined): string {
   return dayjs.tz(iso, "Asia/Bangkok").format("DD/MM/YY");
 }
 
+function SectionLabel({ label }: { label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "4px 0 12px" }}>
+      <div style={{ flex: 1, height: 1, background: "#F3F4F6" }} />
+      <span style={{ fontSize: 11, fontWeight: 600, color: "#9CA3AF", letterSpacing: 0.5, textTransform: "uppercase" }}>{label}</span>
+      <div style={{ flex: 1, height: 1, background: "#F3F4F6" }} />
+    </div>
+  );
+}
+
+function CalcRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#6B7280", marginTop: 4 }}>
+      <span>{label}</span>
+      <span style={{ fontWeight: 600, color: "#111827" }}>{value}</span>
+    </div>
+  );
+}
+
+// ── View states ─────────────────────────────────────────────────
+// "rooms"  → show room card list for selected property
+// "bills"  → show bill list for selected room
+type ViewState = "rooms" | "bills";
+
 // ── Main Page ───────────────────────────────────────────────────
 export default function BillsPage() {
   const { t } = useTranslation();
   const { properties, loading: propsLoading } = useProperties();
 
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
-  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
+  const [view, setView] = useState<ViewState>("rooms");
 
   const { rooms, loading: roomsLoading } = useRooms(selectedPropertyId);
-  const { bills, loading: billsLoading, createBill, updateBillStatus, deleteBill, fetchLatestReadings } = useBills(selectedRoomId);
+  const { bills, loading: billsLoading, createBill, updateBillStatus, deleteBill, fetchLatestReadings } =
+    useBills(view === "bills" ? selectedRoom?.id ?? null : null);
 
-  const selectedRoom = rooms.find((r) => r.id === selectedRoomId);
+  const selectedProperty = properties.find((p) => p.id === selectedPropertyId);
 
-  // Drawer state
+  // ── Navigate to room's bill list ──────────────────────────────
+  function enterRoom(room: Room) {
+    setSelectedRoom(room);
+    setView("bills");
+  }
+
+  function backToRooms() {
+    setSelectedRoom(null);
+    setView("rooms");
+  }
+
+  // ── Drawer state ──────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [readingsLoading, setReadingsLoading] = useState(false);
@@ -80,7 +101,7 @@ export default function BillsPage() {
   // Share token modal
   const [shareToken, setShareToken] = useState<string | null>(null);
 
-  // ── Recalculate totals from form values ───────────────────────
+  // ── Recalculate totals ────────────────────────────────────────
   function recalcTotals(values: Record<string, unknown>) {
     const rent = Number(values.rent_amount ?? 0) || 0;
     const wPrev = values.water_prev_reading != null ? Number(values.water_prev_reading) : null;
@@ -105,28 +126,25 @@ export default function BillsPage() {
 
   // ── Open create drawer ────────────────────────────────────────
   async function openCreate() {
-    if (!selectedRoomId || !selectedRoom) return;
+    if (!selectedRoom) return;
     form.resetFields();
     setWaterUsage(null); setWaterAmount(null);
     setElecUsage(null); setElecAmount(null);
     setOtherTotal(0); setTotalAmount(0);
 
-    // Default: period = current month, due = last day of month
     const now = dayjs.tz(undefined, "Asia/Bangkok");
     const periodStart = now.startOf("month");
     const periodEnd = now.endOf("month").startOf("day");
-    const dueAt = periodEnd;
 
-    // Billing unit from room rental type
     const unitMap: Record<string, string> = {
       monthly: "month", daily: "day", hourly: "hour", stall: "stall",
     };
-    const billingUnit = selectedRoom.rental_type ? (unitMap[selectedRoom.rental_type] ?? "month") : "month";
+    const billingUnit = selectedRoom.rental_type
+      ? (unitMap[selectedRoom.rental_type] ?? "month") : "month";
 
     form.setFieldsValue({
       period_start: periodStart,
       period_end: periodEnd,
-      due_at: dueAt,
       billing_unit: billingUnit,
       billing_quantity: 1,
       rent_amount: selectedRoom.base_rent ?? undefined,
@@ -134,9 +152,8 @@ export default function BillsPage() {
 
     setDrawerOpen(true);
 
-    // Load latest readings
     setReadingsLoading(true);
-    const readings = await fetchLatestReadings(selectedRoomId);
+    const readings = await fetchLatestReadings(selectedRoom.id);
     setReadingsLoading(false);
     form.setFieldsValue({
       water_prev_reading: readings.water ?? undefined,
@@ -145,13 +162,12 @@ export default function BillsPage() {
     recalcTotals(form.getFieldsValue());
   }
 
-  // ── Save bill ────────────────────────────────────────────────
+  // ── Save bill ─────────────────────────────────────────────────
   async function handleSave() {
     let values: Record<string, unknown>;
     try { values = await form.validateFields(); } catch { return; }
-    if (!selectedRoomId) return;
+    if (!selectedRoom) return;
 
-    // Validate: curr >= prev
     const wPrev = values.water_prev_reading as number | null;
     const wCurr = values.water_curr_reading as number | null;
     const ePrev = values.electricity_prev_reading as number | null;
@@ -164,10 +180,10 @@ export default function BillsPage() {
     }
 
     const input: BillInput = {
-      room_id: selectedRoomId,
+      room_id: selectedRoom.id,
       period_start: (values.period_start as Dayjs).toISOString(),
       period_end: (values.period_end as Dayjs).toISOString(),
-      due_at: (values.due_at as Dayjs).toISOString(),
+      due_at: (values.period_end as Dayjs).toISOString(),  // due = period end
       billing_unit: values.billing_unit as BillInput["billing_unit"],
       billing_quantity: Number(values.billing_quantity ?? 1),
       rent_amount: Number(values.rent_amount ?? 0),
@@ -189,6 +205,13 @@ export default function BillsPage() {
     if (token) setShareToken(token);
   }
 
+  const billingUnitOptions = [
+    { value: "month", label: t("bills.unitMonth") },
+    { value: "day",   label: t("bills.unitDay") },
+    { value: "hour",  label: t("bills.unitHour") },
+    { value: "stall", label: t("bills.unitStall") },
+  ];
+
   // ── Table columns ─────────────────────────────────────────────
   const columns = [
     {
@@ -196,9 +219,7 @@ export default function BillsPage() {
       dataIndex: "period_start",
       key: "period",
       render: (v: string, r: { period_end: string }) => (
-        <span style={{ fontSize: 13 }}>
-          {fmtDate(v)} – {fmtDate(r.period_end)}
-        </span>
+        <span style={{ fontSize: 13 }}>{fmtDate(v)} – {fmtDate(r.period_end)}</span>
       ),
     },
     {
@@ -206,9 +227,7 @@ export default function BillsPage() {
       dataIndex: "total_amount",
       key: "total",
       render: (v: number) => (
-        <span style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>
-          ฿ {fmt(v)}
-        </span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>฿ {fmt(v)}</span>
       ),
     },
     {
@@ -224,10 +243,7 @@ export default function BillsPage() {
       render: (v: BillStatus) => {
         const cfg = STATUS_CONFIG[v];
         return (
-          <span style={{
-            fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
-            background: cfg.bg, color: cfg.color,
-          }}>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6, background: cfg.bg, color: cfg.color }}>
             {t(cfg.labelKey)}
           </span>
         );
@@ -238,10 +254,8 @@ export default function BillsPage() {
       key: "actions",
       render: (_: unknown, r: { id: string; status: BillStatus }) => (
         <div style={{ display: "flex", gap: 6 }}>
-          {r.status !== "paid" && (
-            <Button
-              size="small"
-              style={{ borderRadius: 6, fontSize: 12 }}
+          {r.status !== "paid" ? (
+            <Button size="small" style={{ borderRadius: 6, fontSize: 12 }}
               onClick={async () => {
                 const err = await updateBillStatus(r.id, "paid");
                 if (err) message.error(err);
@@ -250,11 +264,8 @@ export default function BillsPage() {
             >
               {t("bills.markPaid")}
             </Button>
-          )}
-          {r.status === "paid" && (
-            <Button
-              size="small"
-              style={{ borderRadius: 6, fontSize: 12 }}
+          ) : (
+            <Button size="small" style={{ borderRadius: 6, fontSize: 12 }}
               onClick={async () => {
                 const err = await updateBillStatus(r.id, "pending");
                 if (err) message.error(err);
@@ -264,10 +275,7 @@ export default function BillsPage() {
               {t("bills.markPending")}
             </Button>
           )}
-          <Button
-            size="small"
-            danger
-            style={{ borderRadius: 6, fontSize: 12 }}
+          <Button size="small" danger style={{ borderRadius: 6, fontSize: 12 }}
             onClick={() => {
               Modal.confirm({
                 title: t("bills.deleteConfirm"),
@@ -289,23 +297,36 @@ export default function BillsPage() {
     },
   ];
 
-  const billingUnitOptions = [
-    { value: "month", label: t("bills.unitMonth") },
-    { value: "day",   label: t("bills.unitDay") },
-    { value: "hour",  label: t("bills.unitHour") },
-    { value: "stall", label: t("bills.unitStall") },
-  ];
-
-  const isReady = !!selectedPropertyId && !!selectedRoomId;
-
+  // ── Render ────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-      {/* Header */}
+
+      {/* ── Header + breadcrumb ──────────────────────────────── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#111827" }}>
-          {t("nav.bills")}
-        </h2>
-        {isReady && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {view === "bills" && (
+            <button
+              onClick={backToRooms}
+              style={{
+                display: "flex", alignItems: "center", gap: 4,
+                background: "none", border: "none", cursor: "pointer",
+                fontSize: 14, color: "#6B7280", padding: "4px 0",
+              }}
+            >
+              <ChevronLeftIcon />
+              {selectedProperty?.label ?? t("bills.selectProperty")}
+            </button>
+          )}
+          {view === "bills" && (
+            <span style={{ fontSize: 14, color: "#D1D5DB" }}>/</span>
+          )}
+          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 600, color: "#111827" }}>
+            {view === "bills" && selectedRoom
+              ? selectedRoom.label
+              : t("nav.bills")}
+          </h2>
+        </div>
+        {view === "bills" && (
           <Button
             type="primary"
             onClick={openCreate}
@@ -316,93 +337,170 @@ export default function BillsPage() {
         )}
       </div>
 
-      {/* Property + Room selectors */}
+      {/* ── Property selector ────────────────────────────────── */}
       <div style={{
-        background: "#FFFFFF", borderRadius: 12, padding: "16px 20px",
+        background: "#FFFFFF", borderRadius: 12, padding: "14px 20px",
         boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
-        display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+        display: "flex", alignItems: "center", gap: 12,
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 14, fontWeight: 500, color: "#374151", whiteSpace: "nowrap" }}>
-            {t("bills.selectProperty")}
+        <span style={{ fontSize: 14, fontWeight: 500, color: "#374151", whiteSpace: "nowrap" }}>
+          {t("bills.selectProperty")}
+        </span>
+        {propsLoading ? <Spin size="small" /> : (
+          <Select
+            style={{ minWidth: 220 }}
+            placeholder={t("bills.selectPropertyPlaceholder")}
+            value={selectedPropertyId}
+            onChange={(v) => {
+              setSelectedPropertyId(v);
+              setSelectedRoom(null);
+              setView("rooms");
+            }}
+            options={properties.map((p) => ({
+              value: p.id,
+              label: p.label + (p.province ? ` · ${p.province}` : ""),
+            }))}
+          />
+        )}
+        {!selectedPropertyId && !propsLoading && (
+          <span style={{ fontSize: 13, color: "#9CA3AF" }}>
+            {properties.length === 0 ? t("rooms.noProperties") : t("bills.selectPropertyPlaceholder")}
           </span>
-          {propsLoading ? <Spin size="small" /> : (
-            <Select
-              style={{ minWidth: 200 }}
-              placeholder={t("bills.selectPropertyPlaceholder")}
-              value={selectedPropertyId}
-              onChange={(v) => { setSelectedPropertyId(v); setSelectedRoomId(null); }}
-              options={properties.map((p) => ({
-                value: p.id,
-                label: p.label + (p.province ? ` · ${p.province}` : ""),
-              }))}
-            />
-          )}
-        </div>
-        {selectedPropertyId && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 14, fontWeight: 500, color: "#374151", whiteSpace: "nowrap" }}>
-              {t("bills.selectRoom")}
-            </span>
-            {roomsLoading ? <Spin size="small" /> : (
-              <Select
-                style={{ minWidth: 160 }}
-                placeholder={t("bills.selectRoomPlaceholder")}
-                value={selectedRoomId}
-                onChange={setSelectedRoomId}
-                options={rooms.map((r) => ({
-                  value: r.id,
-                  label: r.label + (r.floor ? ` (${r.floor}F)` : ""),
-                }))}
-              />
-            )}
-          </div>
         )}
       </div>
 
-      {/* Empty state */}
-      {!isReady && (
-        <div style={{
-          background: "#FFFFFF", borderRadius: 12, padding: 60,
-          boxShadow: "0 1px 4px rgba(0,0,0,0.06)", textAlign: "center",
-        }}>
-          <div style={{ width: 48, height: 48, background: "#EFF6FF", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-            <ReceiptIcon />
-          </div>
-          <p style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 600, color: "#111827" }}>{t("bills.selectFirst")}</p>
-          <p style={{ margin: 0, fontSize: 14, color: "#9CA3AF" }}>{t("bills.selectFirstDesc")}</p>
-        </div>
+      {/* ── No property selected ─────────────────────────────── */}
+      {!selectedPropertyId && (
+        <EmptyState icon={<ReceiptIcon />} title={t("bills.selectFirst")} desc={t("bills.selectFirstDesc")} />
       )}
 
-      {/* Bills table */}
-      {isReady && (
-        <div style={{ background: "#FFFFFF", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden" }}>
-          {billsLoading ? (
+      {/* ── Room card list ───────────────────────────────────── */}
+      {selectedPropertyId && view === "rooms" && (
+        <>
+          {roomsLoading ? (
             <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><Spin /></div>
-          ) : bills.length === 0 ? (
-            <div style={{ padding: 60, textAlign: "center" }}>
-              <div style={{ width: 48, height: 48, background: "#EFF6FF", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-                <ReceiptIcon />
-              </div>
-              <p style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 600, color: "#111827" }}>{t("bills.emptyTitle")}</p>
-              <p style={{ margin: "0 0 16px", fontSize: 14, color: "#9CA3AF" }}>{t("bills.emptyDesc")}</p>
-              <Button type="primary" onClick={openCreate} style={{ borderRadius: 8 }}>+ {t("bills.add")}</Button>
-            </div>
+          ) : rooms.length === 0 ? (
+            <EmptyState icon={<ReceiptIcon />} title={t("rooms.emptyTitle", { property: selectedProperty?.label })} desc={t("rooms.emptyDesc")} />
           ) : (
-            <Table
-              dataSource={bills}
-              columns={columns}
-              rowKey="id"
-              pagination={{ pageSize: 20, hideOnSinglePage: true }}
-              style={{ padding: "0 4px" }}
-            />
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+              {rooms.map((room) => {
+                const oc = ROOM_OCCUPANCY_CONFIG[room.occupancy_status];
+                const expStatus = getExpiryStatus(room.expires_at);
+                const expColor = expStatus === "expired" ? "#DC2626" : expStatus === "warning" ? "#D97706" : "#6B7280";
+                return (
+                  <button
+                    key={room.id}
+                    onClick={() => enterRoom(room)}
+                    style={{
+                      background: "#FFFFFF", borderRadius: 12, padding: "16px 18px",
+                      boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+                      borderLeft: `3px solid ${oc.dotColor}`,
+                      border: "none", cursor: "pointer", textAlign: "left",
+                      display: "flex", flexDirection: "column", gap: 10,
+                      transition: "box-shadow 0.15s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 4px 12px rgba(30,64,255,0.12)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.06)")}
+                  >
+                    {/* Room header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 600, color: "#111827" }}>{room.label}</div>
+                        {room.floor && (
+                          <div style={{ fontSize: 12, color: "#9CA3AF" }}>{t("rooms.floorLabel")} {room.floor}</div>
+                        )}
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", borderRadius: 6, background: oc.bg, color: oc.color, whiteSpace: "nowrap" }}>
+                        {t(`rooms.status_${room.occupancy_status}`)}
+                      </span>
+                    </div>
+                    {/* Room details */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {room.base_rent != null && (
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 12, color: "#6B7280" }}>{t("rooms.baseRent")}</span>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>฿ {Number(room.base_rent).toLocaleString("th-TH")}</span>
+                        </div>
+                      )}
+                      {room.rental_type && (
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 12, color: "#6B7280" }}>{t("rooms.rentalType")}</span>
+                          <span style={{ fontSize: 12, color: "#374151" }}>{t(`rooms.type_${room.rental_type}`)}</span>
+                        </div>
+                      )}
+                      {room.expires_at && (
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontSize: 12, color: "#6B7280" }}>{t("rooms.fieldExpiresAt")}</span>
+                          <span style={{ fontSize: 12, color: expColor, fontWeight: expStatus !== "normal" ? 600 : 400 }}>
+                            {formatBKK(room.expires_at)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    {/* Enter hint */}
+                    <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 4, marginTop: 2 }}>
+                      <span style={{ fontSize: 12, color: "#1E40FF", fontWeight: 500 }}>{t("bills.viewBills")}</span>
+                      <ChevronRightIcon />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           )}
-        </div>
+        </>
       )}
 
-      {/* ── Create Bill Drawer ──────────────────────────────────── */}
+      {/* ── Bill list ─────────────────────────────────────────── */}
+      {selectedPropertyId && view === "bills" && selectedRoom && (
+        <>
+          {/* Room info bar */}
+          <div style={{
+            background: "#FFFFFF", borderRadius: 12, padding: "12px 20px",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+            display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: ROOM_OCCUPANCY_CONFIG[selectedRoom.occupancy_status].dotColor }} />
+              <span style={{ fontSize: 14, fontWeight: 600, color: "#111827" }}>{selectedRoom.label}</span>
+              {selectedRoom.floor && <span style={{ fontSize: 12, color: "#9CA3AF" }}>· {t("rooms.floorLabel")} {selectedRoom.floor}</span>}
+            </div>
+            {selectedRoom.rental_type && (
+              <span style={{ fontSize: 12, color: "#6B7280" }}>{t(`rooms.type_${selectedRoom.rental_type}`)}</span>
+            )}
+            {selectedRoom.base_rent != null && (
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>฿ {Number(selectedRoom.base_rent).toLocaleString("th-TH")}</span>
+            )}
+          </div>
+
+          {/* Bills table */}
+          <div style={{ background: "#FFFFFF", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", overflow: "hidden" }}>
+            {billsLoading ? (
+              <div style={{ display: "flex", justifyContent: "center", padding: 40 }}><Spin /></div>
+            ) : bills.length === 0 ? (
+              <div style={{ padding: 60, textAlign: "center" }}>
+                <div style={{ width: 48, height: 48, background: "#EFF6FF", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
+                  <ReceiptIcon />
+                </div>
+                <p style={{ margin: "0 0 4px", fontSize: 15, fontWeight: 600, color: "#111827" }}>{t("bills.emptyTitle")}</p>
+                <p style={{ margin: "0 0 16px", fontSize: 14, color: "#9CA3AF" }}>{t("bills.emptyDesc")}</p>
+                <Button type="primary" onClick={openCreate} style={{ borderRadius: 8 }}>+ {t("bills.add")}</Button>
+              </div>
+            ) : (
+              <Table
+                dataSource={bills}
+                columns={columns}
+                rowKey="id"
+                pagination={{ pageSize: 20, hideOnSinglePage: true }}
+                style={{ padding: "0 4px" }}
+              />
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ── Create Bill Drawer ────────────────────────────────── */}
       <Drawer
-        title={t("bills.createTitle")}
+        title={`${t("bills.createTitle")} · ${selectedRoom?.label ?? ""}`}
         placement="right"
         width={520}
         open={drawerOpen}
@@ -421,13 +519,9 @@ export default function BillsPage() {
           </div>
         }
       >
-        <Form
-          form={form}
-          layout="vertical"
-          requiredMark={false}
-          onValuesChange={(_, all) => recalcTotals(all)}
-        >
-          {/* ── Billing period ─────────────────────────────────── */}
+        <Form form={form} layout="vertical" requiredMark={false} onValuesChange={(_, all) => recalcTotals(all)}>
+
+          {/* ── Billing period ──────────────────────────────── */}
           <SectionLabel label={t("bills.sectionPeriod")} />
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -439,10 +533,7 @@ export default function BillsPage() {
             </Form.Item>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-            <Form.Item name="due_at" label={t("bills.fieldDueAt")} rules={[{ required: true }]}>
-              <DatePicker size="large" style={{ width: "100%", borderRadius: 8 }} format="DD/MM/YY" />
-            </Form.Item>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Form.Item name="billing_unit" label={t("bills.fieldBillingUnit")}>
               <Select size="large" style={{ borderRadius: 8 }} options={billingUnitOptions} />
             </Form.Item>
@@ -451,7 +542,7 @@ export default function BillsPage() {
             </Form.Item>
           </div>
 
-          {/* ── Rent ───────────────────────────────────────────── */}
+          {/* ── Rent ─────────────────────────────────────────── */}
           <SectionLabel label={t("bills.sectionRent")} />
 
           <Form.Item name="rent_amount" label={t("bills.fieldRentAmount")} rules={[{ required: true }]}>
@@ -459,7 +550,7 @@ export default function BillsPage() {
               style={{ width: "100%", borderRadius: 8 }} />
           </Form.Item>
 
-          {/* ── Utilities ──────────────────────────────────────── */}
+          {/* ── Utilities ─────────────────────────────────────── */}
           <SectionLabel label={t("bills.sectionUtility")} />
 
           <Spin spinning={readingsLoading}>
@@ -526,7 +617,7 @@ export default function BillsPage() {
             </div>
           </Spin>
 
-          {/* ── Other fees ─────────────────────────────────────── */}
+          {/* ── Other fees ────────────────────────────────────── */}
           <SectionLabel label={t("bills.sectionOther")} />
 
           <Form.List name="other_fees">
@@ -541,20 +632,13 @@ export default function BillsPage() {
                       <InputNumber min={0} precision={2} prefix="฿" placeholder="0.00"
                         size="large" style={{ width: "100%", borderRadius: 8 }} />
                     </Form.Item>
-                    <Button
-                      size="large"
-                      danger
-                      onClick={() => remove(name)}
-                      style={{ borderRadius: 8, marginBottom: 0, flexShrink: 0 }}
-                    >
+                    <Button size="large" danger onClick={() => remove(name)} style={{ borderRadius: 8, flexShrink: 0 }}>
                       {t("bills.removeOtherFee")}
                     </Button>
                   </div>
                 ))}
-                <Button
-                  onClick={() => add({ label: "", amount: 0 })}
-                  style={{ borderRadius: 8, width: "100%", marginBottom: 8 }}
-                >
+                <Button onClick={() => add({ label: "", amount: 0 })}
+                  style={{ borderRadius: 8, width: "100%", marginBottom: 8 }}>
                   {t("bills.addOtherFee")}
                 </Button>
                 {otherTotal > 0 && (
@@ -564,7 +648,7 @@ export default function BillsPage() {
             )}
           </Form.List>
 
-          {/* ── Summary ────────────────────────────────────────── */}
+          {/* ── Summary ───────────────────────────────────────── */}
           <div style={{
             marginTop: 16, background: "#EFF6FF", borderRadius: 10, padding: "14px 16px",
             display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -585,13 +669,8 @@ export default function BillsPage() {
         cancelButtonProps={{ style: { display: "none" } }}
       >
         <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12 }}>
-          <Input
-            readOnly
-            value={shareToken ? `${window.location.origin}/b/${shareToken}` : ""}
-            style={{ borderRadius: 8 }}
-          />
-          <Button
-            style={{ borderRadius: 8, flexShrink: 0 }}
+          <Input readOnly value={shareToken ? `${window.location.origin}/b/${shareToken}` : ""} style={{ borderRadius: 8 }} />
+          <Button style={{ borderRadius: 8, flexShrink: 0 }}
             onClick={() => {
               if (shareToken) {
                 navigator.clipboard.writeText(`${window.location.origin}/b/${shareToken}`);
@@ -607,10 +686,31 @@ export default function BillsPage() {
   );
 }
 
+// ── Sub-components ──────────────────────────────────────────────
+function EmptyState({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
+  return (
+    <div style={{
+      background: "#FFFFFF", borderRadius: 12, padding: 60,
+      boxShadow: "0 1px 4px rgba(0,0,0,0.06)", textAlign: "center",
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 12,
+    }}>
+      <div style={{ width: 48, height: 48, background: "#EFF6FF", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>{icon}</div>
+      <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#111827" }}>{title}</p>
+      <p style={{ margin: 0, fontSize: 14, color: "#9CA3AF" }}>{desc}</p>
+    </div>
+  );
+}
+
 // ── Icons ───────────────────────────────────────────────────────
 function ReceiptIcon() {
   return <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#1E40FF" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M16 8H8"/><path d="M16 12H8"/><path d="M12 16H8"/></svg>;
 }
 function CopyIcon() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>;
+}
+function ChevronLeftIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
+}
+function ChevronRightIcon() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1E40FF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
 }

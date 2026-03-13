@@ -188,6 +188,7 @@ const resources = {
         colStatus: "状态",
         colDue: "到期日",
         colActions: "操作",
+        viewBills: "查看账单",
       },
       dashboard: {
         properties: "楼盘数",
@@ -393,6 +394,7 @@ const resources = {
         colStatus: "Status",
         colDue: "Due",
         colActions: "Actions",
+        viewBills: "View bills",
       },
       dashboard: {
         properties: "Properties",
@@ -598,6 +600,7 @@ const resources = {
         colStatus: "สถานะ",
         colDue: "ครบกำหนด",
         colActions: "จัดการ",
+        viewBills: "ดูบิล",
       },
       dashboard: {
         properties: "อสังหาริมทรัพย์",
