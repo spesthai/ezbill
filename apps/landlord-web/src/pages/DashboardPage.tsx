@@ -1,7 +1,9 @@
+import { Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { NavLink, Route, Routes } from "react-router-dom";
-import { supabase } from "../lib/supabaseClient";
+import { useDashboard } from "../hooks/useDashboard";
 import { useSession } from "../hooks/useSession";
+import { supabase } from "../lib/supabaseClient";
 
 const NAV_ITEMS = [
   { key: "dashboard", icon: DashboardIcon, labelKey: "nav.dashboard", to: "/" },
@@ -76,28 +78,122 @@ export default function DashboardPage() {
   );
 }
 
+const STATUS_CONFIG: Record<string, { bg: string; color: string; key: string }> = {
+  pending:  { bg: "#FEF3C7", color: "#D97706", key: "dashboard.statusPending" },
+  paid:     { bg: "#D1FAE5", color: "#059669", key: "dashboard.statusPaid" },
+  overdue:  { bg: "#FEE2E2", color: "#DC2626", key: "dashboard.statusOverdue" },
+};
+
 function DashboardHome() {
   const { t } = useTranslation();
-  const stats = [
-    { icon: BuildingIcon, labelKey: "dashboard.properties", value: "—" },
-    { icon: DoorIcon, labelKey: "dashboard.rooms", value: "—" },
-    { icon: FileIcon, labelKey: "dashboard.monthBills", value: "—" },
-    { icon: BanknoteIcon, labelKey: "dashboard.pending", value: "—" },
+  const { stats, recentBills, loading, error } = useDashboard();
+
+  const statCards = [
+    { icon: BuildingIcon, labelKey: "dashboard.properties", value: stats?.propertyCount },
+    { icon: DoorIcon,     labelKey: "dashboard.rooms",      value: stats?.roomCount },
+    { icon: FileIcon,     labelKey: "dashboard.monthBills", value: stats?.monthBillCount },
+    {
+      icon: BanknoteIcon,
+      labelKey: "dashboard.pending",
+      value: stats ? `฿ ${stats.pendingAmount.toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : undefined,
+    },
   ];
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* Stats row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
-        {stats.map(({ icon: Icon, labelKey, value }) => (
-          <div key={labelKey} style={{ background: "#FFFFFF", borderRadius: 12, padding: "16px 20px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: 8 }}>
+        {statCards.map(({ icon: Icon, labelKey, value }) => (
+          <div key={labelKey} style={{
+            background: "#FFFFFF", borderRadius: 12, padding: "16px 20px",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: 8,
+          }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Icon /><span style={{ fontSize: 13, color: "#6B7280" }}>{t(labelKey)}</span>
+              <Icon />
+              <span style={{ fontSize: 13, color: "#6B7280" }}>{t(labelKey)}</span>
             </div>
-            <span style={{ fontSize: 28, fontWeight: 600, color: "#111827" }}>{value}</span>
+            {loading ? (
+              <Spin size="small" />
+            ) : (
+              <span style={{ fontSize: value !== undefined && String(value).length > 6 ? 20 : 28, fontWeight: 600, color: "#111827" }}>
+                {value ?? 0}
+              </span>
+            )}
           </div>
         ))}
       </div>
-      <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 32, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", textAlign: "center", color: "#9CA3AF", fontSize: 14 }}>
-        {t("dashboard.comingSoon")}
+
+      {/* Recent bills */}
+      <div style={{ background: "#FFFFFF", borderRadius: 12, boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+        {/* Header */}
+        <div style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "0 20px", height: 52, borderBottom: "1px solid #F3F4F6",
+        }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: "#111827" }}>{t("dashboard.recentBills")}</span>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <div style={{ padding: "12px 20px", color: "#EF4444", fontSize: 13 }}>{error}</div>
+        )}
+
+        {/* Loading */}
+        {loading && !error && (
+          <div style={{ padding: 32, display: "flex", justifyContent: "center" }}>
+            <Spin />
+          </div>
+        )}
+
+        {/* Empty */}
+        {!loading && !error && recentBills.length === 0 && (
+          <div style={{ padding: 40, textAlign: "center", color: "#9CA3AF", fontSize: 14 }}>
+            {t("dashboard.noBills")}
+          </div>
+        )}
+
+        {/* Table head */}
+        {!loading && recentBills.length > 0 && (
+          <>
+            <div style={{
+              display: "grid", gridTemplateColumns: "1fr 1fr 120px 100px",
+              padding: "0 20px", height: 36, background: "#F9FAFB",
+              alignItems: "center",
+            }}>
+              {["dashboard.colRoom", "dashboard.colPeriod", "dashboard.colAmount", "dashboard.colStatus"].map((k) => (
+                <span key={k} style={{ fontSize: 12, fontWeight: 600, color: "#6B7280" }}>{t(k)}</span>
+              ))}
+            </div>
+
+            {recentBills.map((bill, i) => {
+              const sc = STATUS_CONFIG[bill.status] ?? STATUS_CONFIG.pending;
+              const period = new Date(bill.periodStart).toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit" });
+              const isLast = i === recentBills.length - 1;
+              return (
+                <div key={bill.id} style={{
+                  display: "grid", gridTemplateColumns: "1fr 1fr 120px 100px",
+                  padding: "0 20px", height: 48, alignItems: "center",
+                  borderBottom: isLast ? "none" : "1px solid #F3F4F6",
+                }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontSize: 14, color: "#111827", fontWeight: 500 }}>{bill.roomLabel}</span>
+                    <span style={{ fontSize: 12, color: "#9CA3AF" }}>{bill.propertyLabel}</span>
+                  </div>
+                  <span style={{ fontSize: 14, color: "#6B7280" }}>{period}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: "#111827" }}>
+                    ฿ {Number(bill.totalAmount).toLocaleString("th-TH")}
+                  </span>
+                  <span style={{
+                    display: "inline-flex", padding: "3px 10px", borderRadius: 6,
+                    background: sc.bg, color: sc.color, fontSize: 12, fontWeight: 600, width: "fit-content",
+                  }}>
+                    {t(sc.key)}
+                  </span>
+                </div>
+              );
+            })}
+          </>
+        )}
       </div>
     </div>
   );
