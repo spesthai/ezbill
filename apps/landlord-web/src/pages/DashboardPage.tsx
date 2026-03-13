@@ -4,6 +4,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { useDashboard } from "../hooks/useDashboard";
 import { useSession } from "../hooks/useSession";
 import { supabase } from "../lib/supabaseClient";
+import BillsPage from "./BillsPage";
 import PropertiesPage from "./PropertiesPage";
 import RoomsPage from "./RoomsPage";
 
@@ -73,7 +74,7 @@ export default function DashboardPage() {
             <Route path="/" element={<DashboardHome />} />
             <Route path="/properties" element={<PropertiesPage />} />
             <Route path="/rooms" element={<RoomsPage />} />
-            <Route path="/bills" element={<ComingSoon labelKey="nav.bills" />} />
+            <Route path="/bills" element={<BillsPage />} />
             <Route path="/settings" element={<ComingSoon labelKey="nav.settings" />} />
           </Routes>
         </main>
