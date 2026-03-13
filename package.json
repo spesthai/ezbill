@@ -4,7 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "workspaces": [
-    "apps/landlord-web"
+    "apps/landlord-web",
+    "apps/api-worker"
   ],
   "scripts": {
     "build": "npm --workspace apps/landlord-web run build",
