@@ -1,4 +1,4 @@
-import { AutoComplete, Button, Drawer, Form, Input, Modal, message } from "antd";
+import { Button, Drawer, Form, Input, Modal, Spin, message } from "antd";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { type Property, type PropertyInput, useProperties } from "../hooks/useProperties";
@@ -60,29 +60,182 @@ async function getAddressIndex(): Promise<AddressRecord[]> {
   return records;
 }
 
+// ── Address Search Box ──────────────────────────────────────────
+interface AddressSearchProps {
+  onSelect: (record: AddressRecord) => void;
+  loadIndex: () => Promise<AddressRecord[]>;
+  placeholder: string;
+  label: string;
+}
+
+function AddressSearch({ onSelect, loadIndex, placeholder, label }: AddressSearchProps) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<AddressRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState<AddressRecord | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function handleChange(value: string) {
+    setQuery(value);
+    setSelected(null);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+
+    if (value.trim().length < 1) {
+      setResults([]);
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      const index = await loadIndex();
+      setLoading(false);
+      const lower = value.toLowerCase().trim();
+      const isZip = /^\d+$/.test(lower);
+
+      const matched = index
+        .filter((r) => {
+          if (isZip) return String(r.zipCode).startsWith(lower);
+          return (
+            r.tambonTh.includes(value) ||
+            r.tambonEn.toLowerCase().includes(lower) ||
+            r.amphoeTh.includes(value) ||
+            r.amphoeEn.toLowerCase().includes(lower) ||
+            r.provinceTh.includes(value) ||
+            r.provinceEn.toLowerCase().includes(lower)
+          );
+        })
+        .slice(0, 12);
+
+      setResults(matched);
+    }, 200);
+  }
+
+  function handleSelect(record: AddressRecord) {
+    setSelected(record);
+    setResults([]);
+    setQuery("");
+    onSelect(record);
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 500, color: "#374151", marginBottom: 6 }}>
+        {label}
+      </div>
+      <div style={{ position: "relative" }}>
+        <input
+          value={query}
+          onChange={(e) => handleChange(e.target.value)}
+          placeholder={placeholder}
+          style={{
+            width: "100%", height: 40, padding: "0 12px",
+            border: "1px solid #D1D5DB", borderRadius: 8,
+            fontSize: 14, outline: "none", boxSizing: "border-box",
+            background: "#FFFFFF", color: "#111827",
+          }}
+          onFocus={(e) => { e.target.style.borderColor = "#1E40FF"; e.target.style.boxShadow = "0 0 0 2px rgba(30,64,255,0.1)"; }}
+          onBlur={(e) => { e.target.style.borderColor = "#D1D5DB"; e.target.style.boxShadow = "none"; }}
+        />
+        {loading && (
+          <div style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}>
+            <Spin size="small" />
+          </div>
+        )}
+      </div>
+
+      {/* Result cards */}
+      {results.length > 0 && (
+        <div style={{
+          marginTop: 6, border: "1px solid #E5E7EB", borderRadius: 10,
+          background: "#FFFFFF", boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+          maxHeight: 300, overflowY: "auto",
+        }}>
+          {results.map((r, i) => (
+            <button
+              key={i}
+              onClick={() => handleSelect(r)}
+              style={{
+                display: "block", width: "100%", textAlign: "left",
+                padding: "10px 14px", border: "none", background: "transparent",
+                cursor: "pointer", borderBottom: i < results.length - 1 ? "1px solid #F3F4F6" : "none",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#F0F4FF"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+            >
+              {/* Zip code badge */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                <span style={{
+                  fontSize: 11, fontWeight: 600, color: "#1E40FF",
+                  background: "#EFF6FF", borderRadius: 4, padding: "1px 6px",
+                  letterSpacing: 0.5,
+                }}>
+                  {r.zipCode}
+                </span>
+              </div>
+              {/* Thai line */}
+              <div style={{ fontSize: 13, fontWeight: 500, color: "#111827", lineHeight: 1.5 }}>
+                ต.{r.tambonTh} · อ.{r.amphoeTh} · {r.provinceTh}
+              </div>
+              {/* English line */}
+              <div style={{ fontSize: 12, color: "#6B7280", lineHeight: 1.5 }}>
+                {r.tambonEn} · {r.amphoeEn} · {r.provinceEn}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Selected badge */}
+      {selected && (
+        <div style={{
+          marginTop: 8, padding: "8px 12px",
+          background: "#F0F7FF", border: "1px solid #BFDBFE",
+          borderRadius: 8, display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <CheckIcon />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: "#1E40FF" }}>
+              ต.{selected.tambonTh} · อ.{selected.amphoeTh} · {selected.provinceTh}
+            </div>
+            <div style={{ fontSize: 12, color: "#6B7280" }}>
+              {selected.tambonEn} · {selected.amphoeEn} · {selected.provinceEn} · {selected.zipCode}
+            </div>
+          </div>
+          <button
+            onClick={() => setSelected(null)}
+            style={{ marginLeft: "auto", border: "none", background: "none", cursor: "pointer", color: "#9CA3AF", fontSize: 16, lineHeight: 1 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Page ──────────────────────────────────────────────────
 export default function PropertiesPage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { properties, loading, createProperty, updateProperty, deleteProperty } = useProperties();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Property | null>(null);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<PropertyInput>();
-
-  // AutoComplete state
-  const [tambonOptions, setTambonOptions] = useState<{ value: string; label: string; record: AddressRecord }[]>([]);
   const indexRef = useRef<AddressRecord[] | null>(null);
 
-  const loadIndex = useCallback(async () => {
+  const loadIndex = useCallback(async (): Promise<AddressRecord[]> => {
     if (!indexRef.current) {
       indexRef.current = await getAddressIndex();
     }
+    return indexRef.current;
   }, []);
 
   function openCreate() {
     setEditing(null);
     form.resetFields();
     setDrawerOpen(true);
-    loadIndex();
   }
 
   function openEdit(p: Property) {
@@ -95,7 +248,6 @@ export default function PropertiesPage() {
       full_address: p.full_address ?? "",
     });
     setDrawerOpen(true);
-    loadIndex();
   }
 
   async function handleSave() {
@@ -125,36 +277,12 @@ export default function PropertiesPage() {
     });
   }
 
-  const isEn = i18n.language === "en";
-
-  function handleTambonSearch(text: string) {
-    if (!indexRef.current || text.length < 1) {
-      setTambonOptions([]);
-      return;
-    }
-    const lower = text.toLowerCase();
-    const matched = indexRef.current
-      .filter((r) =>
-        r.tambonTh.includes(text) ||
-        r.tambonEn.toLowerCase().includes(lower)
-      )
-      .slice(0, 20)
-      .map((r) => ({
-        value: isEn ? r.tambonEn : r.tambonTh,
-        label: `${isEn ? r.tambonEn : r.tambonTh} · ${isEn ? r.amphoeEn : r.amphoeTh} · ${isEn ? r.provinceEn : r.provinceTh}`,
-        record: r,
-      }));
-    setTambonOptions(matched);
-  }
-
-  function handleTambonSelect(_value: string, option: { record: AddressRecord }) {
-    const r = option.record;
+  function handleAddressSelect(r: AddressRecord) {
     form.setFieldsValue({
-      tambon: isEn ? r.tambonEn : r.tambonTh,
-      amphoe: isEn ? r.amphoeEn : r.amphoeTh,
-      province: isEn ? r.provinceEn : r.provinceTh,
+      tambon: r.tambonTh,
+      amphoe: r.amphoeTh,
+      province: r.provinceTh,
     });
-    setTambonOptions([]);
   }
 
   return (
@@ -287,17 +415,27 @@ export default function PropertiesPage() {
             <Input placeholder={t("properties.fieldLabelPlaceholder")} size="large" style={{ borderRadius: 8 }} />
           </Form.Item>
 
-          {/* Tambon with autocomplete — selecting auto-fills amphoe + province */}
-          <Form.Item name="tambon" label={t("properties.fieldTambon")}>
-            <AutoComplete
-              options={tambonOptions}
-              onSearch={handleTambonSearch}
-              onSelect={handleTambonSelect}
-              placeholder={t("properties.fieldTambonPlaceholder")}
-              size="large"
-              style={{ width: "100%", borderRadius: 8 }}
-              filterOption={false}
+          {/* Address search — supports zip, Thai, English */}
+          <Form.Item style={{ marginBottom: 16 }}>
+            <AddressSearch
+              label={t("properties.searchAddressLabel")}
+              placeholder={t("properties.searchAddressPlaceholder")}
+              loadIndex={loadIndex}
+              onSelect={handleAddressSelect}
             />
+          </Form.Item>
+
+          {/* Divider */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: 10, margin: "0 0 16px",
+          }}>
+            <div style={{ flex: 1, height: 1, background: "#F3F4F6" }} />
+            <span style={{ fontSize: 12, color: "#9CA3AF" }}>{t("properties.orManual")}</span>
+            <div style={{ flex: 1, height: 1, background: "#F3F4F6" }} />
+          </div>
+
+          <Form.Item name="tambon" label={t("properties.fieldTambon")}>
+            <Input placeholder={t("properties.fieldTambonPlaceholder")} size="large" style={{ borderRadius: 8 }} />
           </Form.Item>
 
           <Form.Item name="amphoe" label={t("properties.fieldAmphoe")}>
@@ -333,4 +471,7 @@ function LocationIcon() {
 }
 function TrashIcon() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>;
+}
+function CheckIcon() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1E40FF" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><polyline points="20 6 9 17 4 12"/></svg>;
 }
