@@ -1,0 +1,14 @@
+{
+  "name": "ezbill",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": [
+    "apps/landlord-web"
+  ],
+  "scripts": {
+    "build": "npm --workspace apps/landlord-web run build",
+    "typecheck": "npm --workspace apps/landlord-web run typecheck"
+  }
+}
+
