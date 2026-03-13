@@ -139,13 +139,14 @@ export default function BillsPage() {
   // never chain end → start → end, so errors never accumulate.
 
   function monthlyStart(anchor: Dayjs, step: number): Dayjs {
-    // dayjs.add(n, "month") already clamps to month-end when needed
     return anchor.add(step, "month");
   }
 
-  // End of a monthly period = (start of next period) − 1 day
+  // End = same day-of-month as anchor, one month later
+  // e.g. anchor=30/03, step=0 → end=30/04
+  //      anchor=30/01, step=0 → end=28/02 (Feb clamped), step=1 → end=30/03
   function monthlyEnd(anchor: Dayjs, step: number): Dayjs {
-    return anchor.add(step + 1, "month").subtract(1, "day");
+    return anchor.add(step + 1, "month");
   }
 
   // For daily: end = start + (qty - 1) days  (same-day if qty=1)
