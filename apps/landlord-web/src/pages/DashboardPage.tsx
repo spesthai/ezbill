@@ -4,6 +4,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { useDashboard } from "../hooks/useDashboard";
 import { useSession } from "../hooks/useSession";
 import { supabase } from "../lib/supabaseClient";
+import PropertiesPage from "./PropertiesPage";
 
 const NAV_ITEMS = [
   { key: "dashboard", icon: DashboardIcon, labelKey: "nav.dashboard", to: "/" },
@@ -68,7 +69,7 @@ export default function DashboardPage() {
         <main style={{ flex: 1, overflow: "auto", padding: 24, background: "#F9FAFB" }}>
           <Routes>
             <Route path="/" element={<DashboardHome />} />
-            <Route path="/properties" element={<ComingSoon labelKey="nav.properties" />} />
+            <Route path="/properties" element={<PropertiesPage />} />
             <Route path="/bills" element={<ComingSoon labelKey="nav.bills" />} />
             <Route path="/settings" element={<ComingSoon labelKey="nav.settings" />} />
           </Routes>
