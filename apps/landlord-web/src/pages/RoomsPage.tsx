@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useProperties } from "../hooks/useProperties";
 import { type BulkRoomInput, type Room, type RoomInput, useRooms } from "../hooks/useRooms";
+import type { MeterReadings } from "../hooks/useRooms";
 
 // ── Occupancy status config ────────────────────────────────────
 const OCCUPANCY_CONFIG = {
@@ -22,31 +23,40 @@ function SectionLabel({ label }: { label: string }) {
 }
 
 // ── Meter reading fields (reused in both Drawers) ─────────────
-function MeterFields({ t }: { t: (k: string) => string }) {
+function MeterFields({
+  t, editing = false, loading = false,
+}: { t: (k: string) => string; editing?: boolean; loading?: boolean }) {
+  const hintBg    = editing ? "#FFFBEB" : "#F0F7FF";
+  const hintBorder = editing ? "#FDE68A" : "#BFDBFE";
+  const hintColor  = editing ? "#B45309" : "#3B82F6";
+  const hintKey    = editing ? "rooms.meterHintEdit" : "rooms.meterHint";
+
   return (
     <>
       <SectionLabel label={t("rooms.sectionMeter")} />
-      <div style={{ background: "#F0F7FF", border: "1px solid #BFDBFE", borderRadius: 8, padding: "12px 14px", marginBottom: 16, fontSize: 12, color: "#3B82F6" }}>
-        {t("rooms.meterHint")}
+      <div style={{ background: hintBg, border: `1px solid ${hintBorder}`, borderRadius: 8, padding: "12px 14px", marginBottom: 16, fontSize: 12, color: hintColor }}>
+        {t(hintKey)}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <Form.Item name="initial_water_reading" label={t("rooms.fieldWater")} style={{ marginBottom: 0 }}>
-          <InputNumber
-            size="large" min={0} precision={2}
-            placeholder="0.00"
-            suffix="m³"
-            style={{ width: "100%", borderRadius: 8 }}
-          />
-        </Form.Item>
-        <Form.Item name="initial_electricity_reading" label={t("rooms.fieldElectricity")} style={{ marginBottom: 0 }}>
-          <InputNumber
-            size="large" min={0} precision={2}
-            placeholder="0.00"
-            suffix="kWh"
-            style={{ width: "100%", borderRadius: 8 }}
-          />
-        </Form.Item>
-      </div>
+      <Spin spinning={loading}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Form.Item name="initial_water_reading" label={t("rooms.fieldWater")} style={{ marginBottom: 0 }}>
+            <InputNumber
+              size="large" min={0} precision={2}
+              placeholder="0.00"
+              suffix="m³"
+              style={{ width: "100%", borderRadius: 8 }}
+            />
+          </Form.Item>
+          <Form.Item name="initial_electricity_reading" label={t("rooms.fieldElectricity")} style={{ marginBottom: 0 }}>
+            <InputNumber
+              size="large" min={0} precision={2}
+              placeholder="0.00"
+              suffix="kWh"
+              style={{ width: "100%", borderRadius: 8 }}
+            />
+          </Form.Item>
+        </div>
+      </Spin>
     </>
   );
 }
@@ -57,12 +67,13 @@ export default function RoomsPage() {
   const { properties, loading: propertiesLoading } = useProperties();
 
   const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
-  const { rooms, loading: roomsLoading, createRoom, updateRoom, deleteRoom, bulkCreateRooms } = useRooms(selectedPropertyId);
+  const { rooms, loading: roomsLoading, createRoom, updateRoom, deleteRoom, bulkCreateRooms, fetchMeterReadings } = useRooms(selectedPropertyId);
 
   // Single room drawer
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<Room | null>(null);
   const [saving, setSaving] = useState(false);
+  const [meterLoading, setMeterLoading] = useState(false);
   const [form] = Form.useForm<RoomInput>();
 
   // Bulk create drawer
@@ -100,7 +111,7 @@ export default function RoomsPage() {
     setDrawerOpen(true);
   }
 
-  function openEdit(r: Room) {
+  async function openEdit(r: Room) {
     setEditing(r);
     form.setFieldsValue({
       label: r.label,
@@ -108,8 +119,18 @@ export default function RoomsPage() {
       rental_type: r.rental_type ?? undefined,
       occupancy_status: r.occupancy_status,
       base_rent: r.base_rent ?? undefined,
+      initial_water_reading: undefined,
+      initial_electricity_reading: undefined,
     });
     setDrawerOpen(true);
+    // Load current meter readings asynchronously
+    setMeterLoading(true);
+    const readings: MeterReadings = await fetchMeterReadings(r.id);
+    setMeterLoading(false);
+    form.setFieldsValue({
+      initial_water_reading: readings.water ?? undefined,
+      initial_electricity_reading: readings.electricity ?? undefined,
+    });
   }
 
   async function handleSave() {
@@ -414,8 +435,8 @@ export default function RoomsPage() {
               style={{ width: "100%", borderRadius: 8 }} />
           </Form.Item>
 
-          {/* Meter readings — only for new rooms */}
-          {!editing && <MeterFields t={t} />}
+          {/* Meter readings — always shown; editing loads current baseline */}
+          <MeterFields t={t} editing={!!editing} loading={meterLoading} />
         </Form>
       </Drawer>
 

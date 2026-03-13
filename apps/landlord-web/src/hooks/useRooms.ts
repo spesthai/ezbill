@@ -24,13 +24,19 @@ export interface RoomInput {
 
 // For bulk creation: template fields + auto-naming config
 export interface BulkRoomInput extends Omit<RoomInput, "label"> {
-  prefix: string;          // e.g. "A", "摊位", "Room"
-  start: number;           // starting number
-  count: number;           // how many rooms to create
-  digits: number;          // zero-pad digits, e.g. 2 → "01","02"
+  prefix: string;
+  start: number;
+  count: number;
+  digits: number;
 }
 
-async function insertInitialReadings(
+// Latest meter readings for a room
+export interface MeterReadings {
+  water: number | null;
+  electricity: number | null;
+}
+
+async function upsertMeterReadings(
   roomId: string,
   water: number | null | undefined,
   electricity: number | null | undefined
@@ -63,6 +69,30 @@ export function useRooms(propertyId: string | null) {
 
   useEffect(() => { fetchAll(); }, [propertyId]);
 
+  // Fetch the latest meter readings for a specific room
+  async function fetchMeterReadings(roomId: string): Promise<MeterReadings> {
+    if (!supabase) return { water: null, electricity: null };
+    const { data } = await supabase
+      .from("utility_readings")
+      .select("reading_type, reading_value")
+      .eq("room_id", roomId)
+      .in("reading_type", ["water", "electricity"])
+      .order("reading_at", { ascending: false });
+
+    const readings: MeterReadings = { water: null, electricity: null };
+    if (!data) return readings;
+    // Take the most recent record per type
+    for (const row of data) {
+      if (row.reading_type === "water" && readings.water === null) {
+        readings.water = row.reading_value;
+      }
+      if (row.reading_type === "electricity" && readings.electricity === null) {
+        readings.electricity = row.reading_value;
+      }
+    }
+    return readings;
+  }
+
   async function createRoom(input: RoomInput): Promise<string | null> {
     if (!supabase || !propertyId) return "Not ready";
     const { data, error: err } = await supabase.from("rooms").insert({
@@ -74,7 +104,7 @@ export function useRooms(propertyId: string | null) {
       base_rent: input.base_rent ?? null,
     }).select("id").single();
     if (err) return err.message;
-    await insertInitialReadings(data.id, input.initial_water_reading, input.initial_electricity_reading);
+    await upsertMeterReadings(data.id, input.initial_water_reading, input.initial_electricity_reading);
     await fetchAll();
     return null;
   }
@@ -89,7 +119,8 @@ export function useRooms(propertyId: string | null) {
       base_rent: input.base_rent ?? null,
     }).eq("id", id);
     if (err) return err.message;
-    // Initial readings are only set on create, not updated here
+    // Always write new meter readings when provided (new record = new baseline)
+    await upsertMeterReadings(id, input.initial_water_reading, input.initial_electricity_reading);
     await fetchAll();
     return null;
   }
@@ -110,10 +141,9 @@ export function useRooms(propertyId: string | null) {
       };
     });
 
-    const { data, error: err } = await supabase.from("rooms").insert(rows).select("id");
-    if (err) return { created: 0, error: err.message };
+    const { data, error: bulkErr } = await supabase.from("rooms").insert(rows).select("id");
+    if (bulkErr) return { created: 0, error: bulkErr.message };
 
-    // Insert initial readings for each created room
     const now = new Date().toISOString();
     const readingRows: { room_id: string; reading_type: string; reading_at: string; reading_value: number }[] = [];
     for (const row of data ?? []) {
@@ -138,5 +168,5 @@ export function useRooms(propertyId: string | null) {
     return null;
   }
 
-  return { rooms, loading, error, createRoom, updateRoom, bulkCreateRooms, deleteRoom, refetch: fetchAll };
+  return { rooms, loading, error, createRoom, updateRoom, bulkCreateRooms, deleteRoom, fetchMeterReadings, refetch: fetchAll };
 }
