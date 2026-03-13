@@ -124,32 +124,66 @@ export default function BillsPage() {
     setOtherTotal(ot); setTotalAmount(total);
   }
 
-  // ── Auto-calculate period_end from period_start + unit + qty ─
+  // ── Month-aware period helpers ────────────────────────────────
+  //
+  // For monthly/stall billing the anchor day (date-of-month) never drifts.
+  // e.g. anchor = 30/01 → bills start on 30/01, 28/02*, 30/03, 30/04 …
+  //   (* 28/02 because Feb has no 30th — clamped to month end by dayjs)
+  //
+  // Special case — anchor is a "month-end" day (28/29/30/31):
+  //   If adding months would push dayjs past the true anchor day, we clamp
+  //   back to the last real day of that month (dayjs already does this).
+  //   Then the NEXT month we try to restore the anchor (e.g. Mar 31 after Feb 28).
+  //
+  // To do this correctly we always compute from the *original* anchor,
+  // never chain end → start → end, so errors never accumulate.
+
+  function monthlyStart(anchor: Dayjs, step: number): Dayjs {
+    // dayjs.add(n, "month") already clamps to month-end when needed
+    return anchor.add(step, "month");
+  }
+
+  // End of a monthly period = (start of next period) − 1 day
+  function monthlyEnd(anchor: Dayjs, step: number): Dayjs {
+    return anchor.add(step + 1, "month").subtract(1, "day");
+  }
+
+  // For daily: end = start + (qty - 1) days  (same-day if qty=1)
+  // For hourly: end = start + qty hours
   function calcPeriodEnd(start: Dayjs, unit: string, qty: number): Dayjs {
-    const q = qty || 1;
     switch (unit) {
-      case "month": return start.add(q, "month").subtract(1, "day");
-      case "day":   return start.add(q - 1, "day");
-      case "hour":  return start.add(q, "hour");
-      case "stall": return start.add(q, "month").subtract(1, "day");
-      default:      return start.add(q, "month").subtract(1, "day");
+      case "month":
+      case "stall": return monthlyEnd(start, 0);   // 1 period from this start
+      case "day":   return start.add(qty - 1, "day");
+      case "hour":  return start.add(qty, "hour");
+      default:      return monthlyEnd(start, 0);
     }
+  }
+
+  // Build all (start, end) pairs for N consecutive bills anchored at `anchor`
+  function buildBillPeriods(anchor: Dayjs, unit: string, count: number): Array<{ start: Dayjs; end: Dayjs }> {
+    const periods: Array<{ start: Dayjs; end: Dayjs }> = [];
+    for (let i = 0; i < count; i++) {
+      if (unit === "month" || unit === "stall") {
+        periods.push({ start: monthlyStart(anchor, i), end: monthlyEnd(anchor, i) });
+      } else if (unit === "day") {
+        const s = anchor.add(i, "day");
+        periods.push({ start: s, end: s });
+      } else { // hour
+        const s = anchor.add(i, "hour");
+        periods.push({ start: s, end: s.add(1, "hour") });
+      }
+    }
+    return periods;
   }
 
   function handlePeriodFieldChange(_: unknown, all: Record<string, unknown>) {
     const start = all.period_start as Dayjs | undefined;
     const unit  = all.billing_unit as string | undefined;
-    // period_end = end of the FIRST bill (1 period unit)
     if (start?.isValid() && unit) {
       form.setFieldValue("period_end", calcPeriodEnd(start, unit, 1));
     }
     recalcTotals(form.getFieldsValue());
-  }
-
-  // Next bill start = day after current bill ends (or next hour for hourly)
-  function nextPeriodStart(end: Dayjs, unit: string): Dayjs {
-    if (unit === "hour") return end.add(1, "second");
-    return end.add(1, "day");
   }
 
   // ── Open create drawer ────────────────────────────────────────
@@ -219,10 +253,11 @@ export default function BillsPage() {
 
     setSaving(true);
     const tokens: string[] = [];
-    let curStart = values.period_start as Dayjs;
+    const anchor = values.period_start as Dayjs;
+    const periods = buildBillPeriods(anchor, billingUnit, billCount);
 
-    for (let i = 0; i < billCount; i++) {
-      const curEnd = calcPeriodEnd(curStart, billingUnit, 1);
+    for (let i = 0; i < periods.length; i++) {
+      const { start: curStart, end: curEnd } = periods[i];
       const input: BillInput = {
         room_id: selectedRoom.id,
         period_start: curStart.toISOString(),
@@ -243,7 +278,6 @@ export default function BillsPage() {
       const { shareToken: token, error: err } = await createBill(input);
       if (err) { message.error(err); setSaving(false); return; }
       if (token) tokens.push(token);
-      curStart = nextPeriodStart(curEnd, billingUnit);
     }
 
     setSaving(false);
@@ -604,14 +638,10 @@ export default function BillsPage() {
               const end   = form.getFieldValue("period_end") as Dayjs | undefined;
               const unit  = form.getFieldValue("billing_unit") as string | undefined;
               const count = Math.max(1, Number(form.getFieldValue("bill_count") ?? 1));
-              // last bill's end date
               let lastEnd = end;
               if (start?.isValid() && unit && count > 1) {
-                let s = nextPeriodStart(end ?? start, unit);
-                for (let i = 1; i < count; i++) {
-                  lastEnd = calcPeriodEnd(s, unit, 1);
-                  if (i < count - 1) s = nextPeriodStart(lastEnd, unit);
-                }
+                const periods = buildBillPeriods(start, unit, count);
+                lastEnd = periods[periods.length - 1].end;
               }
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
