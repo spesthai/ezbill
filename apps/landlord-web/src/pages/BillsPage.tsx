@@ -124,6 +124,28 @@ export default function BillsPage() {
     setOtherTotal(ot); setTotalAmount(total);
   }
 
+  // ── Auto-calculate period_end from period_start + unit + qty ─
+  function calcPeriodEnd(start: Dayjs, unit: string, qty: number): Dayjs {
+    const q = qty || 1;
+    switch (unit) {
+      case "month": return start.add(q, "month").subtract(1, "day");
+      case "day":   return start.add(q - 1, "day");
+      case "hour":  return start.add(q, "hour");
+      case "stall": return start.add(q, "month").subtract(1, "day");
+      default:      return start.add(q, "month").subtract(1, "day");
+    }
+  }
+
+  function handlePeriodFieldChange(_: unknown, all: Record<string, unknown>) {
+    const start = all.period_start as Dayjs | undefined;
+    const unit  = all.billing_unit as string | undefined;
+    const qty   = Number(all.billing_quantity ?? 1);
+    if (start?.isValid() && unit) {
+      form.setFieldValue("period_end", calcPeriodEnd(start, unit, qty));
+    }
+    recalcTotals(form.getFieldsValue());
+  }
+
   // ── Open create drawer ────────────────────────────────────────
   async function openCreate() {
     if (!selectedRoom) return;
@@ -132,15 +154,18 @@ export default function BillsPage() {
     setElecUsage(null); setElecAmount(null);
     setOtherTotal(0); setTotalAmount(0);
 
-    const now = dayjs.tz(undefined, "Asia/Bangkok");
-    const periodStart = now.startOf("month");
-    const periodEnd = now.endOf("month").startOf("day");
-
     const unitMap: Record<string, string> = {
       monthly: "month", daily: "day", hourly: "hour", stall: "stall",
     };
     const billingUnit = selectedRoom.rental_type
       ? (unitMap[selectedRoom.rental_type] ?? "month") : "month";
+
+    // period_start: use check_in_at if available, else first day of current month
+    const periodStart = selectedRoom.check_in_at
+      ? dayjs.tz(selectedRoom.check_in_at, "Asia/Bangkok").startOf("day")
+      : dayjs.tz(undefined, "Asia/Bangkok").startOf("month");
+
+    const periodEnd = calcPeriodEnd(periodStart, billingUnit, 1);
 
     form.setFieldsValue({
       period_start: periodStart,
@@ -519,10 +544,19 @@ export default function BillsPage() {
           </div>
         }
       >
-        <Form form={form} layout="vertical" requiredMark={false} onValuesChange={(_, all) => recalcTotals(all)}>
+        <Form form={form} layout="vertical" requiredMark={false} onValuesChange={handlePeriodFieldChange}>
 
           {/* ── Billing period ──────────────────────────────── */}
           <SectionLabel label={t("bills.sectionPeriod")} />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <Form.Item name="billing_unit" label={t("bills.fieldBillingUnit")}>
+              <Select size="large" style={{ borderRadius: 8 }} options={billingUnitOptions} />
+            </Form.Item>
+            <Form.Item name="billing_quantity" label={t("bills.fieldBillingQty")}>
+              <InputNumber size="large" min={0.5} step={0.5} precision={1} style={{ width: "100%", borderRadius: 8 }} />
+            </Form.Item>
+          </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Form.Item name="period_start" label={t("bills.fieldPeriodStart")} rules={[{ required: true }]}>
@@ -533,14 +567,24 @@ export default function BillsPage() {
             </Form.Item>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Form.Item name="billing_unit" label={t("bills.fieldBillingUnit")}>
-              <Select size="large" style={{ borderRadius: 8 }} options={billingUnitOptions} />
-            </Form.Item>
-            <Form.Item name="billing_quantity" label={t("bills.fieldBillingQty")}>
-              <InputNumber size="large" min={0.5} step={0.5} precision={1} style={{ width: "100%", borderRadius: 8 }} />
-            </Form.Item>
-          </div>
+          {/* Due date = period_end (read-only) */}
+          <Form.Item shouldUpdate={(prev, cur) => prev.period_end !== cur.period_end} noStyle>
+            {() => {
+              const end = form.getFieldValue("period_end") as Dayjs | undefined;
+              return (
+                <div style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  background: "#F9FAFB", border: "1px solid #E5E7EB", borderRadius: 8,
+                  padding: "8px 12px", marginBottom: 16, fontSize: 13,
+                }}>
+                  <span style={{ color: "#6B7280" }}>{t("bills.fieldDueAt")}</span>
+                  <span style={{ fontWeight: 600, color: "#374151" }}>
+                    {end?.isValid() ? end.format("DD/MM/YY") : "—"}
+                  </span>
+                </div>
+              );
+            }}
+          </Form.Item>
 
           {/* ── Rent ─────────────────────────────────────────── */}
           <SectionLabel label={t("bills.sectionRent")} />
