@@ -2,6 +2,7 @@ import "antd/dist/reset.css";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import "./lib/i18n";
 import { registerPwa } from "./pwa";
 import "./styles.css";
 
