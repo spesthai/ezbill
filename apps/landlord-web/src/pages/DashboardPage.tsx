@@ -5,12 +5,14 @@ import { useDashboard } from "../hooks/useDashboard";
 import { useSession } from "../hooks/useSession";
 import { supabase } from "../lib/supabaseClient";
 import PropertiesPage from "./PropertiesPage";
+import RoomsPage from "./RoomsPage";
 
 const NAV_ITEMS = [
-  { key: "dashboard", icon: DashboardIcon, labelKey: "nav.dashboard", to: "/" },
-  { key: "properties", icon: BuildingIcon, labelKey: "nav.properties", to: "/properties" },
-  { key: "bills", icon: FileIcon, labelKey: "nav.bills", to: "/bills" },
-  { key: "settings", icon: SettingsIcon, labelKey: "nav.settings", to: "/settings" },
+  { key: "dashboard",  icon: DashboardIcon, labelKey: "nav.dashboard",   to: "/" },
+  { key: "properties", icon: BuildingIcon,  labelKey: "nav.properties",  to: "/properties" },
+  { key: "rooms",      icon: DoorIcon,      labelKey: "nav.rooms",       to: "/rooms" },
+  { key: "bills",      icon: FileIcon,      labelKey: "nav.bills",       to: "/bills" },
+  { key: "settings",   icon: SettingsIcon,  labelKey: "nav.settings",    to: "/settings" },
 ];
 
 export default function DashboardPage() {
@@ -70,6 +72,7 @@ export default function DashboardPage() {
           <Routes>
             <Route path="/" element={<DashboardHome />} />
             <Route path="/properties" element={<PropertiesPage />} />
+            <Route path="/rooms" element={<RoomsPage />} />
             <Route path="/bills" element={<ComingSoon labelKey="nav.bills" />} />
             <Route path="/settings" element={<ComingSoon labelKey="nav.settings" />} />
           </Routes>
