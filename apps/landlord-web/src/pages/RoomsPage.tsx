@@ -1,4 +1,5 @@
 import { Button, DatePicker, Drawer, Form, Input, InputNumber, Modal, Select, Spin, message } from "antd";
+import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,7 +8,7 @@ import { type BulkRoomInput, type Room, type RoomInput, useRooms } from "../hook
 import type { MeterReadings } from "../hooks/useRooms";
 import {
   HOURLY_MAX, HOURLY_MIN, HOURLY_PRESETS,
-  calcExpiresAt, formatBKK, getExpiryStatus, utcToBkkLocal,
+  calcExpiresAt, formatBKK, getExpiryStatus,
   type RentalType,
 } from "../lib/occupancyUtils";
 
@@ -106,7 +107,8 @@ export default function RoomsPage() {
   // ── Occupancy time helpers ───────────────────────────────────
   function recalcExpires(checkInDayjs: Dayjs | null, rentalType: string | undefined, hourlyDuration: number | undefined): string | null {
     if (!checkInDayjs || !rentalType) { setExpiresAtDisplay("—"); return null; }
-    const checkInUtc = new Date(checkInDayjs.valueOf() - 7 * 60 * 60 * 1000);
+    // DatePicker uses dayjs.tz default (Asia/Bangkok) so valueOf() is correct UTC ms
+    const checkInUtc = new Date(checkInDayjs.valueOf());
     const exp = calcExpiresAt(checkInUtc, rentalType as RentalType, hourlyDuration);
     setExpiresAtDisplay(formatBKK(exp));
     return exp.toISOString();
@@ -142,14 +144,10 @@ export default function RoomsPage() {
   async function openEdit(r: Room) {
     setEditing(r);
     setExpiresAtDisplay(r.expires_at ? formatBKK(r.expires_at) : "—");
-    // Build check_in dayjs from UTC stored value (shift to BKK for display)
+    // Convert UTC ISO to BKK dayjs for DatePicker display
     let checkInDayjs = null;
     if (r.check_in_at) {
-      const bkkLocal = utcToBkkLocal(r.check_in_at);
-      if (bkkLocal) {
-        const { default: dayjs } = await import("dayjs");
-        checkInDayjs = dayjs(bkkLocal);
-      }
+      checkInDayjs = dayjs.tz(r.check_in_at, "Asia/Bangkok");
     }
     form.setFieldsValue({
       label: r.label,
@@ -179,7 +177,8 @@ export default function RoomsPage() {
     try { values = await form.validateFields(); } catch { return; }
     // Convert Dayjs (BKK local) to UTC ISO for storage
     if (values.check_in_dayjs) {
-      values.check_in_at = new Date(values.check_in_dayjs.valueOf() - 7 * 60 * 60 * 1000).toISOString();
+      // BKK-timezone dayjs — valueOf() gives correct UTC ms
+      values.check_in_at = new Date(values.check_in_dayjs.valueOf()).toISOString();
     } else {
       values.check_in_at = null;
       values.expires_at = null;
