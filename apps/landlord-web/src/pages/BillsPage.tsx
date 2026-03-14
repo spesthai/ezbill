@@ -53,6 +53,16 @@ function CalcRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ── Helpers ─────────────────────────────────────────────────────
+// Convert a dayjs date (treated as BKK local date) to a UTC ISO string
+// that preserves the date when decoded in +07:00.
+// e.g. 31/03 BKK → "2026-03-31T00:00:00+07:00" → stored as 2026-03-30T17:00:00Z
+// But Supabase displays date columns by their date part in the stored TZ,
+// so we store as noon BKK to avoid any edge-case UTC date shift.
+function bkkDateToISO(d: Dayjs): string {
+  return d.format("YYYY-MM-DD") + "T12:00:00+07:00";
+}
+
 // ── View states ─────────────────────────────────────────────────
 // "rooms"  → show room card list for selected property
 // "bills"  → show bill list for selected room
@@ -261,9 +271,9 @@ export default function BillsPage() {
       const { start: curStart, end: curEnd } = periods[i];
       const input: BillInput = {
         room_id: selectedRoom.id,
-        period_start: curStart.toISOString(),
-        period_end: curEnd.toISOString(),
-        due_at: curEnd.toISOString(),
+        period_start: bkkDateToISO(curStart),
+        period_end: bkkDateToISO(curEnd),
+        due_at: bkkDateToISO(curEnd),
         billing_unit: billingUnit,
         billing_quantity: 1,
         rent_amount: rent,
