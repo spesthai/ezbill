@@ -1,5 +1,5 @@
 import {
-  Button, DatePicker, Drawer, Form, Input, InputNumber,
+  Button, DatePicker, Drawer, Form, Grid, Input, InputNumber,
   Modal, Select, Spin, Table, message,
 } from "antd";
 import dayjs from "dayjs";
@@ -80,6 +80,9 @@ export default function BillsPage() {
   const { rooms, loading: roomsLoading } = useRooms(selectedPropertyId);
   const { bills, loading: billsLoading, createBill, updateBillStatus, deleteBill, fetchLatestReadings } =
     useBills(view === "bills" ? selectedRoom?.id ?? null : null);
+
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;  // < 768px
 
   const selectedProperty = properties.find((p) => p.id === selectedPropertyId);
 
@@ -577,6 +580,71 @@ export default function BillsPage() {
                 <p style={{ margin: "0 0 16px", fontSize: 14, color: "#9CA3AF" }}>{t("bills.emptyDesc")}</p>
                 <Button type="primary" onClick={openCreate} style={{ borderRadius: 8 }}>+ {t("bills.add")}</Button>
               </div>
+            ) : isMobile ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                {bills.map((bill) => {
+                  const cfg = STATUS_CONFIG[bill.status as BillStatus];
+                  return (
+                    <div key={bill.id} style={{ padding: "14px 16px", borderBottom: "1px solid #F3F4F6" }}>
+                      {/* Period + status */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <span style={{ fontSize: 13, color: "#374151", fontWeight: 500 }}>
+                          {fmtDate(bill.period_start)} – {fmtDate(bill.period_end)}
+                        </span>
+                        <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 6, background: cfg.bg, color: cfg.color }}>
+                          {t(cfg.labelKey)}
+                        </span>
+                      </div>
+                      {/* Total + due */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                        <span style={{ fontSize: 16, fontWeight: 700, color: "#111827" }}>฿ {fmt(bill.total_amount)}</span>
+                        <span style={{ fontSize: 12, color: "#9CA3AF" }}>{t("bills.colDue")} {fmtDate(bill.due_at)}</span>
+                      </div>
+                      {/* Actions */}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {bill.status !== "paid" ? (
+                          <Button size="small" style={{ borderRadius: 6, fontSize: 12, flex: 1 }}
+                            onClick={async () => {
+                              const err = await updateBillStatus(bill.id, "paid");
+                              if (err) message.error(err);
+                              else message.success(t("bills.statusPaid"));
+                            }}
+                          >
+                            {t("bills.markPaid")}
+                          </Button>
+                        ) : (
+                          <Button size="small" style={{ borderRadius: 6, fontSize: 12, flex: 1 }}
+                            onClick={async () => {
+                              const err = await updateBillStatus(bill.id, "pending");
+                              if (err) message.error(err);
+                              else message.success(t("bills.statusPending"));
+                            }}
+                          >
+                            {t("bills.markPending")}
+                          </Button>
+                        )}
+                        <Button size="small" danger style={{ borderRadius: 6, fontSize: 12 }}
+                          onClick={() => {
+                            Modal.confirm({
+                              title: t("bills.deleteConfirm"),
+                              okText: t("common.delete"),
+                              okButtonProps: { danger: true },
+                              cancelText: t("common.cancel"),
+                              onOk: async () => {
+                                const err = await deleteBill(bill.id);
+                                if (err) message.error(err);
+                                else message.success(t("bills.deleted"));
+                              },
+                            });
+                          }}
+                        >
+                          {t("common.delete")}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <Table
                 dataSource={bills}
@@ -594,7 +662,7 @@ export default function BillsPage() {
       <Drawer
         title={`${t("bills.createTitle")} · ${selectedRoom?.label ?? ""}`}
         placement="right"
-        width={520}
+        width={isMobile ? "100%" : 520}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         footer={
