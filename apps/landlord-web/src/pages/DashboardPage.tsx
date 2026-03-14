@@ -1,4 +1,5 @@
 import { Spin } from "antd";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { useDashboard } from "../hooks/useDashboard";
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
 export default function DashboardPage() {
   const { session } = useSession();
   const { t } = useTranslation();
+  const [collapsed, setCollapsed] = useState(false);
 
   async function handleSignOut() {
     if (!supabase) return;
@@ -28,41 +30,80 @@ export default function DashboardPage() {
 
   const email = session?.user?.email ?? "";
   const initial = email.charAt(0).toUpperCase();
+  const sideW = collapsed ? 64 : 220;
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "'Inter','Noto Sans Thai',sans-serif" }}>
       <aside style={{
-        width: 220, minHeight: "100vh", background: "#111827",
-        display: "flex", flexDirection: "column", padding: "24px 16px", gap: 8, flexShrink: 0,
+        width: sideW, minHeight: "100vh", background: "#111827",
+        display: "flex", flexDirection: "column",
+        padding: collapsed ? "24px 8px" : "24px 16px",
+        gap: 8, flexShrink: 0,
+        transition: "width 0.2s ease, padding 0.2s ease",
+        overflow: "hidden",
       }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 8px", marginBottom: 8 }}>
-          <div style={{ width: 32, height: 32, background: "#1E40FF", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <ZapIcon />
-          </div>
-          <span style={{ color: "#FFFFFF", fontSize: 18, fontWeight: 600 }}>EZBill</span>
+        {/* Logo + collapse button */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: collapsed ? "center" : "space-between", padding: "0 4px", marginBottom: 8 }}>
+          {!collapsed && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 32, height: 32, background: "#1E40FF", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <ZapIcon />
+              </div>
+              <span style={{ color: "#FFFFFF", fontSize: 18, fontWeight: 600, whiteSpace: "nowrap" }}>EZBill</span>
+            </div>
+          )}
+          {collapsed && (
+            <div style={{ width: 32, height: 32, background: "#1E40FF", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <ZapIcon />
+            </div>
+          )}
+          <button
+            onClick={() => setCollapsed(c => !c)}
+            title={collapsed ? "展开" : "收起"}
+            style={{
+              background: "transparent", border: "none", cursor: "pointer",
+              color: "#6B7280", display: "flex", alignItems: "center", justifyContent: "center",
+              padding: 4, borderRadius: 6, flexShrink: 0,
+              marginLeft: collapsed ? 0 : 4,
+            }}
+          >
+            {collapsed ? <ChevronRightIcon /> : <ChevronLeftIcon />}
+          </button>
         </div>
+
         <div style={{ height: 1, background: "#374151", margin: "4px 0" }} />
+
         <nav style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
           {NAV_ITEMS.map(({ key, icon: Icon, labelKey, to }) => (
-            <NavLink key={key} to={to} end={to === "/"} style={({ isActive }: { isActive: boolean }) => ({
-              display: "flex", alignItems: "center", gap: 10, padding: "0 12px", height: 40,
+            <NavLink key={key} to={to} end={to === "/"} title={collapsed ? t(labelKey) : undefined} style={({ isActive }: { isActive: boolean }) => ({
+              display: "flex", alignItems: "center",
+              justifyContent: collapsed ? "center" : "flex-start",
+              gap: 10, padding: collapsed ? "0" : "0 12px", height: 40,
               borderRadius: 8, textDecoration: "none",
               background: isActive ? "#1E40FF" : "transparent",
               color: isActive ? "#FFFFFF" : "#9CA3AF",
               fontWeight: isActive ? 600 : 400, fontSize: 14,
             })}>
-              <Icon />{t(labelKey)}
+              <span style={{ flexShrink: 0 }}><Icon /></span>
+              {!collapsed && <span style={{ whiteSpace: "nowrap" }}>{t(labelKey)}</span>}
             </NavLink>
           ))}
         </nav>
-        <button onClick={handleSignOut} style={{
-          display: "flex", alignItems: "center", gap: 10, padding: "0 12px", height: 40,
+
+        <button onClick={handleSignOut} title={collapsed ? email : undefined} style={{
+          display: "flex", alignItems: "center",
+          justifyContent: collapsed ? "center" : "flex-start",
+          gap: 10, padding: collapsed ? "0" : "0 12px", height: 40,
           borderRadius: 8, background: "transparent", border: "none", cursor: "pointer",
           color: "#9CA3AF", fontSize: 13, width: "100%",
         }}>
           <div style={{ width: 28, height: 28, background: "#1E3A8A", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "center", color: "#93C5FD", fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{initial}</div>
-          <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email}</span>
-          <LogoutIcon />
+          {!collapsed && (
+            <>
+              <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{email}</span>
+              <LogoutIcon />
+            </>
+          )}
         </button>
       </aside>
 
@@ -229,4 +270,10 @@ function BanknoteIcon() {
 }
 function LogoutIcon() {
   return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>;
+}
+function ChevronLeftIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>;
+}
+function ChevronRightIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>;
 }
