@@ -7,6 +7,7 @@ import { supabase } from "../lib/supabaseClient";
 import BillsPage from "./BillsPage";
 import PropertiesPage from "./PropertiesPage";
 import RoomsPage from "./RoomsPage";
+import SettingsPage from "./SettingsPage";
 
 const NAV_ITEMS = [
   { key: "dashboard",  icon: DashboardIcon, labelKey: "nav.dashboard",   to: "/" },
@@ -75,7 +76,7 @@ export default function DashboardPage() {
             <Route path="/properties" element={<PropertiesPage />} />
             <Route path="/rooms" element={<RoomsPage />} />
             <Route path="/bills" element={<BillsPage />} />
-            <Route path="/settings" element={<ComingSoon labelKey="nav.settings" />} />
+            <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>
       </div>
@@ -204,15 +205,6 @@ function DashboardHome() {
   );
 }
 
-function ComingSoon({ labelKey }: { labelKey: string }) {
-  const { t } = useTranslation();
-  return (
-    <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 40, boxShadow: "0 1px 4px rgba(0,0,0,0.06)", textAlign: "center" }}>
-      <p style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "#111827" }}>{t(labelKey)}</p>
-      <p style={{ margin: "8px 0 0", fontSize: 14, color: "#9CA3AF" }}>{t("dashboard.comingSoon")}</p>
-    </div>
-  );
-}
 
 function ZapIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>;
