@@ -617,9 +617,15 @@ export default function BillsPage() {
           <SectionLabel label={t("bills.sectionPeriod")} />
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Form.Item name="billing_unit" label={t("bills.fieldBillingUnit")}>
-              <Select size="large" style={{ borderRadius: 8 }} options={billingUnitOptions} />
-            </Form.Item>
+            <div>
+              <div style={{ fontSize: 14, color: "#374151", marginBottom: 6 }}>{t("bills.fieldBillingUnit")}</div>
+              <div style={{
+                height: 36, lineHeight: "36px", padding: "0 12px", borderRadius: 8,
+                background: "#F9FAFB", border: "1px solid #E5E7EB", fontSize: 14, color: "#111827",
+              }}>
+                {t(`rooms.type_${selectedRoom?.rental_type ?? "monthly"}`)}
+              </div>
+            </div>
             <Form.Item name="bill_count" label={t("bills.fieldBillCount")}>
               <InputNumber size="large" min={1} max={24} step={1} precision={0} style={{ width: "100%", borderRadius: 8 }} />
             </Form.Item>
